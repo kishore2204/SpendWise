@@ -33,6 +33,17 @@ The user said *"the dispersion is too much"* and *"light cards are too white, wh
 - **Cards use Compose `RoundedCornerShape`** because Kyant 2.0.1's highlight shader only reads corner radii from `CornerBasedShape`. With other shapes it fell back to capsule radii.
 - **"+" is light-lavender glass:** `accentGlass` is dark #C4B9FF at 75% and light #C9BEFF at 70%, with a deep-violet glyph (`onAccentGlass`).
 
+## Lavender gradient + clearer light controls (user request)
+- **The pattern is a linear gradient:** light lavender at the top-right (`patternAccent`: dark #C4B9FF at 25%, light #6E5BD8 at 22%) fading to neutral at the bottom-left. It is composed on the GPU as `ComposeShader(LinearGradient, BitmapShader(mask), DST_IN)`, so there is still no per-frame rasterising.
+- **Light tab bar:**
+  - tint 35% → 16%
+  - no backdrop brightening
+  - inner glow 22%
+  - rim 1.25dp
+  - droplet 90% → 50% white, so the pattern shows through the bar and the selector
+- **"+" is more transparent:** 50% (dark) / 45% (light) lavender, with a white glyph in dark.
+- **"Add account"** uses `LiquidPrimaryButton`, the same lavender glass as "+". It sits inside content, so it refracts the background backdrop.
+
 ## Why guilloché
 It is monochrome, it belongs to the money domain (banknotes, cheques), it reads as print rather than as an AI gradient, and its fine regular lines are exactly what a lens bends visibly.
 

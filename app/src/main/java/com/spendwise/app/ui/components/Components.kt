@@ -22,6 +22,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import com.spendwise.app.ui.glass.LocalBackgroundBackdrop
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -219,4 +226,51 @@ fun MoneyText(
         }
     }
     Text(text, style = style, color = color, modifier = modifier, maxLines = 1)
+}
+
+/**
+ * Primary action as light-lavender liquid glass — the same treatment as the floating "+" button.
+ * Lives inside content, so it refracts the background pattern (never itself).
+ */
+@Composable
+fun LiquidPrimaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+) {
+    val colors = SpendWise.colors
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 1.03f else 1f, spring(dampingRatio = 0.6f, stiffness = 500f), label = "press")
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .liquidGlass(
+                shape = CircleShape,
+                kind = GlassKind.Control,
+                tint = colors.accentGlass,
+                backdropOverride = LocalBackgroundBackdrop.current,
+                lensHeight = 12f,
+                lensAmount = 18f,
+                layerBlock = {
+                    scaleX = scale
+                    scaleY = scale
+                },
+            )
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = colors.onAccentGlass, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(Spacing.xs))
+        }
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.onAccentGlass,
+        )
+    }
 }

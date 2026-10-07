@@ -29,7 +29,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas
-import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageBitmapConfig
 import androidx.compose.ui.graphics.Path
@@ -157,7 +160,10 @@ fun NeutralBackground(modifier: Modifier = Modifier) {
             )
             drawRect(c.background)
             drawRect(light)
-            drawImage(mask.get(this), colorFilter = ColorFilter.tint(c.pattern))
+            // Lines = a lavender→neutral linear gradient masked by the cached guilloché bitmap, composed on the
+            // GPU in one shader (no per-frame rasterising).
+            val paint = mask.paint(this, c.patternAccent, c.pattern)
+            drawIntoCanvas { it.nativeCanvas.drawRect(0f, 0f, size.width, size.height, paint) }
         },
     )
 }
@@ -166,6 +172,28 @@ fun NeutralBackground(modifier: Modifier = Modifier) {
 private class PatternMaskCache {
     private var bitmap: ImageBitmap? = null
     private var cachedSize = Size.Zero
+    private var cachedPaint: android.graphics.Paint? = null
+    private var paintKey: Triple<Size, Color, Color>? = null
+
+    /** Gradient (top-right [accent] → bottom-left [neutral]) masked by the pattern bitmap. Rebuilt only when inputs change. */
+    fun paint(scope: DrawScope, accent: Color, neutral: Color): android.graphics.Paint {
+        val key = Triple(scope.size, accent, neutral)
+        cachedPaint?.let { if (key == paintKey) return it }
+        val maskBitmap = get(scope).asAndroidBitmap()
+        val gradient = android.graphics.LinearGradient(
+            scope.size.width, 0f, 0f, scope.size.height,
+            accent.toArgb(), neutral.toArgb(), android.graphics.Shader.TileMode.CLAMP,
+        )
+        val maskShader = android.graphics.BitmapShader(
+            maskBitmap, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP,
+        )
+        // DST_IN: keep the gradient only where the pattern mask has alpha.
+        val shader = android.graphics.ComposeShader(gradient, maskShader, android.graphics.PorterDuff.Mode.DST_IN)
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.shader = shader }
+        cachedPaint = p
+        paintKey = key
+        return p
+    }
 
     fun get(scope: DrawScope): ImageBitmap {
         val size = scope.size
@@ -223,13 +251,16 @@ fun Modifier.liquidGlass(
     shape: Shape,
     kind: GlassKind = GlassKind.Control,
     tint: Color? = null,
+    /** Override which backdrop is refracted (e.g. a control-style button that lives inside content). */
+    backdropOverride: Backdrop? = null,
     lensHeight: Float = if (kind == GlassKind.Control) 18f else 12f,
     lensAmount: Float = if (kind == GlassKind.Control) 26f else 14f,
     blurDp: Float = if (kind == GlassKind.Control) 1.5f else 2f,
     layerBlock: (GraphicsLayerScope.() -> Unit)? = null,
 ): Modifier {
     val colors = SpendWise.colors
-    val backdrop = (if (kind == GlassKind.Control) LocalContentBackdrop.current else LocalBackgroundBackdrop.current)
+    val backdrop = backdropOverride
+        ?: (if (kind == GlassKind.Control) LocalContentBackdrop.current else LocalBackgroundBackdrop.current)
         ?: return glassFallback(shape)
     val allowed = LocalBlurAllowed.current
     val fill = tint ?: when {
@@ -247,7 +278,7 @@ fun Modifier.liquidGlass(
                     // Light cards must NOT brighten what's behind them, or they wash out to plain white.
                     when {
                         dark -> colorControls(brightness = -0.04f, saturation = 1.05f)
-                        kind == GlassKind.Control -> colorControls(brightness = 0.04f, saturation = 1.05f)
+                        kind == GlassKind.Control -> colorControls(brightness = 0f, saturation = 1.0f)
                         else -> colorControls(brightness = -0.01f, saturation = 1.0f)
                     }
                     blur(blurDp.dp.toPx())
@@ -259,11 +290,15 @@ fun Modifier.liquidGlass(
             // rim faces the light and fading round the far side — the iOS-style edge glint.
             highlight = {
                 Highlight(
-                    width = if (kind == GlassKind.Control) 2.dp else 1.5.dp,
+                    width = when {
+                        kind == GlassKind.Card -> 1.5.dp
+                        dark -> 2.dp
+                        else -> 1.25.dp // light: a thinner rim, so the bar never reads as a white frame
+                    },
                     blurRadius = 1.dp,
                     alpha = 1f,
                     style = HighlightStyle.Default(
-                        color = Color.White.copy(alpha = if (dark) 0.75f else 1f),
+                        color = Color.White.copy(alpha = if (dark) 0.75f else 0.85f),
                         angle = 45f,
                         falloff = 0.7f,
                     ),
@@ -274,7 +309,11 @@ fun Modifier.liquidGlass(
                 InnerShadow(
                     radius = if (kind == GlassKind.Control) 10.dp else 8.dp,
                     offset = DpOffset(0.dp, 0.dp),
-                    color = if (dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.42f),
+                    color = when {
+                        dark -> Color.White.copy(alpha = 0.10f)
+                        kind == GlassKind.Control -> Color.White.copy(alpha = 0.22f)
+                        else -> Color.White.copy(alpha = 0.42f)
+                    },
                 )
             },
             shadow = {

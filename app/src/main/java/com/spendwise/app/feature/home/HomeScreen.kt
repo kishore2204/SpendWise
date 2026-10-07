@@ -26,6 +26,7 @@ import androidx.lifecycle.viewModelScope
 import com.spendwise.app.core.time.IndiaTime
 import com.spendwise.app.data.db.dao.AccountDao
 import com.spendwise.app.ui.components.LargeTitleScreen
+import com.spendwise.app.ui.components.LiquidPrimaryButton
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.spendwise.app.ui.glass.GlassKind
 import com.spendwise.app.ui.glass.liquidGlass
@@ -89,15 +90,6 @@ private fun StartCard(onAddAccount: () -> Unit) {
             color = colors.text2,
         )
         Spacer(Modifier.height(Spacing.lg))
-        Button(
-            onClick = onAddAccount,
-            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = CircleShape,
-        ) {
-            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(Spacing.xs))
-            Text("Add account", style = MaterialTheme.typography.labelLarge)
-        }
+        LiquidPrimaryButton(text = "Add account", onClick = onAddAccount, icon = Icons.Rounded.Add)
     }
 }
