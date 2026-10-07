@@ -36,12 +36,13 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import com.spendwise.app.core.money.Money
-import com.spendwise.app.ui.glass.lightGlass
+import com.spendwise.app.ui.glass.liquidGlass
+import com.kyant.shapes.RoundedRectangle
 import com.spendwise.app.ui.theme.Radius
 import com.spendwise.app.ui.theme.SpendWise
 import com.spendwise.app.ui.theme.Spacing
 
-/** Grouped container (One UI style): solid surface, 20dp corners. Never glass — it holds dense content. */
+/** Grouped container: card-kind liquid glass (more tint, so dense text stays crisp), continuous 20dp corners. */
 @Composable
 fun GroupCard(
     modifier: Modifier = Modifier,
@@ -51,8 +52,8 @@ fun GroupCard(
         modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.screen)
-            .clip(RoundedCornerShape(Radius.group))
-            .background(SpendWise.colors.surface1),
+            .liquidGlass(RoundedRectangle(Radius.group))
+            .clip(RoundedRectangle(Radius.group)),
         content = content,
     )
 }
@@ -122,7 +123,7 @@ fun EmptyState(
         modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.screen)
-            .lightGlass()
+            .liquidGlass()
             .padding(horizontal = Spacing.lg, vertical = Spacing.xl),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

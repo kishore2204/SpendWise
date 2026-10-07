@@ -16,7 +16,8 @@ work = "2.12.0"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 collections-immutable = "0.5.2"
-haze = "2.0.1"
+backdrop = "2.0.1"
+kyant-shapes = "1.2.1"
 vico = "3.3.1"
 junit = "4.13.2"
 truth = "1.4.5"
@@ -64,8 +65,8 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "serialization" }
 kotlinx-collections-immutable = { module = "org.jetbrains.kotlinx:kotlinx-collections-immutable", version.ref = "collections-immutable" }
 
-haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
-haze-blur = { module = "dev.chrisbanes.haze:haze-blur", version.ref = "haze" }
+backdrop = { module = "io.github.kyant0:backdrop", version.ref = "backdrop" }
+kyant-shapes = { module = "io.github.kyant0:shapes", version.ref = "kyant-shapes" }
 vico-compose-m3 = { module = "com.patrykandpatrick.vico:compose-m3", version.ref = "vico" }
 
 junit = { module = "junit:junit", version.ref = "junit" }

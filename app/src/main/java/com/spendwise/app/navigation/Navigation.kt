@@ -38,7 +38,9 @@ import com.spendwise.app.feature.home.HomeScreen
 import com.spendwise.app.feature.insights.InsightsScreen
 import com.spendwise.app.feature.settings.MoreScreen
 import com.spendwise.app.ui.components.BottomBarItem
-import com.spendwise.app.ui.components.GlassBottomBar
+import com.spendwise.app.ui.components.GlassTopBar
+import com.spendwise.app.ui.components.LiquidTabBar
+import com.spendwise.app.ui.glass.LocalGlassTopBar
 import com.spendwise.app.ui.glass.GlassScaffold
 import com.spendwise.app.ui.theme.SpendWise
 import kotlinx.serialization.Serializable
@@ -75,13 +77,14 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
     GlassScaffold(
         reduceTransparency = reduceTransparency,
         overlay = {
+            LocalGlassTopBar.current?.let { GlassTopBar(it, Modifier.align(Alignment.TopCenter)) }
             AnimatedVisibility(
                 visible = showBar,
                 enter = slideInVertically { it } + fadeIn(),
                 exit = slideOutVertically { it } + fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
-                GlassBottomBar(
+                LiquidTabBar(
                     items = TopLevelItems,
                     selected = currentTab,
                     onSelect = { backStack.switchTab(it) },

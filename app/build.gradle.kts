@@ -123,8 +123,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.core)
     implementation(libs.kotlinx.collections.immutable)
 
-    implementation(libs.haze)
-    implementation(libs.haze.blur)
+    implementation(libs.backdrop)
+    implementation(libs.kyant.shapes)
     implementation(libs.vico.compose.m3)
 
     testImplementation(libs.junit)

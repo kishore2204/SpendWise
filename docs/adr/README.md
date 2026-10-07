@@ -10,7 +10,8 @@ Each major decision is made through `/council` and recorded here. A superseded A
 | [004](ADR-004-transaction-model-and-schema.md) | Signed legs + kind trigger, `v_confirmed_txn`, transfer legs, **balance anchors**, schema, 3-layer dedup | Accepted |
 | [005](ADR-005-sms-pipeline.md) | Receiver stages → single processor; fingerprint; 72h-overlap refresh; financial gate; no INTERNET permission | Accepted |
 | [006](ADR-006-parser-design.md) | Hybrid per-bank templates + helpers; rule-table confidence; Couldn't-read list; fixture/fuzz tests | Accepted |
-| [007](ADR-007-design-system.md) | "Light-glass": live blur only where content scrolls beneath; tokens, type, calm motion | Accepted (contrast + versions verified in Phase 2) |
+| [007](ADR-007-design-system.md) | "Light-glass": live blur only where content scrolls beneath; tokens, type, calm motion | Partly superseded by 008 (glass) |
+| [008](ADR-008-liquid-glass.md) | iOS-style liquid glass: Kyant backdrop, aurora, two backdrops, liquid tab bar with droplet | Accepted (user decision) |
 
 ## Planned councils
 - Final product & engineering review (Phase 10)

@@ -10,10 +10,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,38 +24,59 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.Shadow
+import com.kyant.shapes.RoundedRectangle
 import com.spendwise.app.ui.theme.Radius
 import com.spendwise.app.ui.theme.SpendWise
-import dev.chrisbanes.haze.HazeInput
-import dev.chrisbanes.haze.HazeSourceRetention
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.blur.HazeBlurStyle
-import dev.chrisbanes.haze.blur.HazeColorEffect
-import dev.chrisbanes.haze.blur.hazeBlur
-import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.rememberHazeState
 
 /*
- * "Light-glass" design system (ADR-007).
- *  - Live blur only where content scrolls beneath: the bottom-nav pill and the collapsed top bar (≤ 2 layers).
- *  - Everything else gets glass from light: tint + 1dp top-edge highlight + ambient glow behind.
- *  - Money never sits on a blurred surface.
+ * Liquid glass design system (ADR-008, supersedes ADR-007's glass placement).
+ *
+ *  - Real refraction: content bends at the curved edges of glass (lens), lightly blurred, with vibrancy,
+ *    a specular rim highlight and a soft shadow — not frosted blur.
+ *  - Glass needs light behind it: a static four-colour aurora sits under everything.
+ *  - Two backdrops:
+ *      background backdrop = aurora only → used by glass *inside* scrolling content (cards), so a card never
+ *                            samples itself;
+ *      content backdrop    = aurora + screen content → used by floating controls (tab bar, + button, top bar).
+ *  - Readability safeguard: cards carry a stronger tint than controls; money text stays text1 on that tint.
+ *  - Automatic fallback (battery saver, thermal, reduced motion, "Reduce transparency"): same shapes and
+ *    highlights, no blur/lens, near-opaque tint.
  */
 
-/** One HazeState per screen scaffold; glass bars read it from here. */
-val LocalGlassState = staticCompositionLocalOf<HazeState?> { null }
+/** Aurora + screen content. For floating controls drawn above the content. */
+val LocalContentBackdrop = staticCompositionLocalOf<Backdrop?> { null }
 
-/** Whether live blur is allowed right now. False → identical-looking tinted fallback. */
+/** Aurora only. For glass that lives inside scrolling content. */
+val LocalBackgroundBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+
+/** Whether refraction/blur is allowed right now. */
 val LocalBlurAllowed = staticCompositionLocalOf { true }
 
-/**
- * Screen root: static ambient light + content marked as the blur source + overlay slot for glass bars.
- * The ambient layer is inside the source so blur has something to refract over AMOLED black.
- */
+/** The scaffold-level top bar, so it can refract the whole screen (screens publish their title into it). */
+val LocalGlassTopBar = staticCompositionLocalOf<GlassTopBarState?> { null }
+
+@Stable
+class GlassTopBarState {
+    var title by mutableStateOf<String?>(null)
+    var visible by mutableStateOf(false)
+    internal var owner: Any? = null
+}
+
 @Composable
 fun GlassScaffold(
     modifier: Modifier = Modifier,
@@ -63,12 +84,20 @@ fun GlassScaffold(
     overlay: @Composable BoxScope.() -> Unit = {},
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val hazeState = rememberHazeState()
+    val backgroundBackdrop = rememberLayerBackdrop()
+    val contentBackdrop = rememberLayerBackdrop()
+    val topBar = remember { GlassTopBarState() }
     val blurAllowed = rememberBlurAllowed(reduceTransparency)
-    CompositionLocalProvider(LocalGlassState provides hazeState, LocalBlurAllowed provides blurAllowed) {
+
+    CompositionLocalProvider(
+        LocalBackgroundBackdrop provides backgroundBackdrop,
+        LocalContentBackdrop provides contentBackdrop,
+        LocalBlurAllowed provides blurAllowed,
+        LocalGlassTopBar provides topBar,
+    ) {
         Box(modifier.fillMaxSize().background(SpendWise.colors.background)) {
-            Box(Modifier.fillMaxSize().hazeSource(hazeState)) {
-                AmbientLight()
+            Box(Modifier.fillMaxSize().layerBackdrop(contentBackdrop)) {
+                Aurora(Modifier.fillMaxSize().layerBackdrop(backgroundBackdrop))
                 content()
             }
             overlay()
@@ -76,92 +105,88 @@ fun GlassScaffold(
     }
 }
 
-/** Two baked radial gradients — static (no animation, no battery cost). */
+/**
+ * Four soft light pools — static (no animation, no battery cost). Placed so the tab bar (bottom) and the
+ * hero area (upper third) always have colour behind them to refract.
+ */
 @Composable
-fun AmbientLight(modifier: Modifier = Modifier) {
-    val colors = SpendWise.colors
+fun Aurora(modifier: Modifier = Modifier) {
+    val c = SpendWise.colors
     Box(
         modifier
-            .fillMaxSize()
+            .background(c.background)
             .drawBehind {
-                drawRect(
+                fun pool(color: Color, x: Float, y: Float, r: Float) = drawRect(
                     Brush.radialGradient(
-                        colors = listOf(colors.ambientPrimary, colors.ambientPrimary.copy(alpha = 0f)),
-                        center = Offset(size.width * 0.1f, size.height * 0.08f),
-                        radius = size.maxDimension * 0.6f,
+                        colors = listOf(color, color.copy(alpha = color.alpha * 0.35f), color.copy(alpha = 0f)),
+                        center = Offset(size.width * x, size.height * y),
+                        radius = size.maxDimension * r,
                     ),
                 )
-                drawRect(
-                    Brush.radialGradient(
-                        colors = listOf(colors.ambientSecondary, colors.ambientSecondary.copy(alpha = 0f)),
-                        center = Offset(size.width * 0.95f, size.height * 0.55f),
-                        radius = size.maxDimension * 0.55f,
-                    ),
-                )
+                pool(c.aurora1, 0.05f, 0.14f, 0.60f)
+                pool(c.aurora2, 1.0f, 0.42f, 0.55f)
+                pool(c.aurora3, 0.0f, 0.80f, 0.50f)
+                pool(c.aurora4, 0.60f, 1.02f, 0.50f)
             },
     )
 }
 
+enum class GlassKind {
+    /** Floating controls: clear, strong lens. */
+    Control,
+    /** Content cards: more tint so text and money stay crisp. */
+    Card,
+}
+
 /**
- * Live-blurred glass for floating bars. Falls back to an opaque-enough tint when blur is not allowed,
- * chosen so the two states look nearly identical.
+ * Liquid glass surface. [backdrop] defaults by kind: controls refract the whole screen, cards refract the aurora.
  */
 @Composable
-fun Modifier.liveGlass(shape: Shape, state: HazeState? = LocalGlassState.current): Modifier {
-    if (state == null) return lightGlass(shape)
+fun Modifier.liquidGlass(
+    shape: Shape = RoundedRectangle(Radius.card),
+    kind: GlassKind = GlassKind.Card,
+    backdrop: Backdrop? = if (kind == GlassKind.Control) LocalContentBackdrop.current else LocalBackgroundBackdrop.current,
+    tint: Color? = null,
+    lensHeight: Dp = if (kind == GlassKind.Control) 22.dp else 20.dp,
+    lensAmount: Dp = if (kind == GlassKind.Control) 32.dp else 36.dp,
+    blurRadius: Dp = if (kind == GlassKind.Control) 4.dp else 12.dp,
+): Modifier {
     val colors = SpendWise.colors
-    val blurAllowed = LocalBlurAllowed.current
-    val style = remember(colors, blurAllowed) {
-        HazeBlurStyle {
-            blurEnabled(blurAllowed)
-            blurRadius(20.dp)
-            noiseFactor(0.06f)
-            backgroundColor(colors.background)
-            colorEffects(listOf(HazeColorEffect.tint(colors.glassTint)))
-            fallbackColorEffect(HazeColorEffect.tint(colors.glassTintFallback))
-        }
+    if (backdrop == null) return fallbackGlass(shape)
+    val allowed = LocalBlurAllowed.current
+    val fill = tint ?: when {
+        !allowed -> colors.glassTintFallback
+        kind == GlassKind.Control -> colors.glassTint
+        else -> colors.glassCard
     }
-    return this
-        .clip(shape)
-        .hazeBlur(
-            // Financial content: never keep a stale captured frame around.
-            input = HazeInput.Sources(state, retention = HazeSourceRetention.ClearWhenUnavailable),
-            style = style,
-        )
-        .glassEdge(shape)
-}
-
-/** Glass made of light only — no blur. Used for the hero card, FAB, review cards. */
-@Composable
-fun Modifier.lightGlass(shape: Shape = RoundedCornerShape(Radius.card)): Modifier {
-    val colors = SpendWise.colors
-    return this
-        .clip(shape)
-        .background(
-            Brush.verticalGradient(
-                listOf(
-                    colors.surface2.copy(alpha = if (colors.isDark) 0.92f else 1f),
-                    colors.surface1.copy(alpha = if (colors.isDark) 0.96f else 1f),
-                ),
-            ),
-        )
-        .glassEdge(shape)
-}
-
-/** The 1dp top-edge highlight that does most of the "glass" work at almost no cost. */
-@Composable
-fun Modifier.glassEdge(shape: Shape): Modifier {
-    val colors = SpendWise.colors
-    return border(
-        width = 1.dp,
-        brush = Brush.verticalGradient(listOf(colors.glassHighlightTop, colors.glassHighlightBottom, colors.glassHairline)),
-        shape = shape,
+    return drawBackdrop(
+        backdrop = backdrop,
+        shape = { shape },
+        effects = {
+            if (allowed) {
+                vibrancy()
+                blur(blurRadius.toPx())
+                lens(lensHeight.toPx(), lensAmount.toPx())
+            }
+        },
+        highlight = { Highlight.Default.copy(alpha = if (colors.isDark) 0.9f else 1f) },
+        shadow = { Shadow(radius = 24.dp, color = Color.Black.copy(alpha = if (colors.isDark) 0.35f else 0.10f)) },
+        onDrawSurface = { drawRect(fill) },
     )
 }
 
+/** Used only when no backdrop exists (e.g. previews): solid surface + hairline. */
+@Composable
+private fun Modifier.fallbackGlass(shape: Shape): Modifier {
+    val colors = SpendWise.colors
+    return clip(shape)
+        .background(colors.glassTintFallback)
+        .border(1.dp, Brush.verticalGradient(listOf(colors.glassHighlightTop, colors.glassHairline)), shape)
+}
+
 /**
- * Blur is disabled under battery saver, when the system animator scale is 0, or when the user turned on
- * "Reduce transparency" (ADR-007). Battery saver changes are observed live.
+ * Refraction is disabled under battery saver, when thermal status ≥ MODERATE, when the system animator scale
+ * is 0, or when the user turned on "Reduce transparency". Battery saver and thermal changes are observed live.
  */
 @Composable
 private fun rememberBlurAllowed(reduceTransparency: Boolean): Boolean {

@@ -36,7 +36,7 @@ import com.spendwise.app.ui.components.GroupCard
 import com.spendwise.app.ui.components.LargeTitleScreen
 import com.spendwise.app.ui.components.ListRow
 import com.spendwise.app.ui.components.SectionLabel
-import com.spendwise.app.ui.glass.lightGlass
+import com.spendwise.app.ui.glass.liquidGlass
 import com.spendwise.app.ui.theme.SpendWise
 import com.spendwise.app.ui.theme.Spacing
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -87,7 +87,7 @@ private fun WelcomeHero(onAddAccount: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.screen)
-            .lightGlass()
+            .liquidGlass()
             .padding(Spacing.lg),
     ) {
         Text("Your money.\nOn this phone only.", style = MaterialTheme.typography.headlineSmall, color = colors.text1)
