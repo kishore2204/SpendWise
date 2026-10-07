@@ -34,7 +34,7 @@ The user said *"the dispersion is too much"* and *"light cards are too white, wh
 - **"+" is light-lavender glass:** `accentGlass` is dark #C4B9FF at 75% and light #C9BEFF at 70%, with a deep-violet glyph (`onAccentGlass`).
 
 ## Lavender gradient + clearer light controls (user request)
-- **The pattern is a linear gradient:** light lavender at the top-right (`patternAccent`: dark #C4B9FF at 25%, light #6E5BD8 at 22%) fading to neutral at the bottom-left. It is composed on the GPU as `ComposeShader(LinearGradient, BitmapShader(mask), DST_IN)`, so there is still no per-frame rasterising.
+- **The pattern is a linear gradient:** light lavender at the top-right (`patternAccent`, deepened on user request: dark #7B6CF0 at 40%, light #4A35C2 at 30%) fading to neutral at the bottom-left. It is composed on the GPU as `ComposeShader(LinearGradient, BitmapShader(mask), DST_IN)`, so there is still no per-frame rasterising.
 - **Light tab bar:**
   - tint 35% → 16%
   - no backdrop brightening
