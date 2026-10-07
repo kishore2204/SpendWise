@@ -15,6 +15,17 @@ After ADR-009 the user found the glass "not visible in both themes, too minimal"
 - **Performance:** the pattern (about 60k path segments) is rasterised **once per size** into an `Alpha8` mask and drawn tinted each frame. On the Galaxy A56 (debug build) this took janky frames from 100% to 5.5% and p50 from 97ms to 13ms. The release build must be re-measured in Phase 3; the target is p90 ≤ 8.3ms.
 - Fallback (reduce transparency or battery saver) is unchanged: same shapes and edges, cards use the solid `surface1`.
 
+## Tuning after device review (same day)
+The user said *"the dispersion is too much"* and *"light cards are too white, which reduces the glass"*. Changes:
+- **Lens roughly halved.** Controls go from 26/48dp with depth to 16/22dp. Cards go from 20/32dp to 12/14dp. The droplet goes to 6–10/8–14dp. The "+" goes to 10/14dp.
+- **Chromatic aberration removed everywhere**, including the pressed droplet.
+- **Light cards:**
+  - The white tint drops from 55% to 20%.
+  - The glass no longer brightens its backdrop (`colorControls` brightness −0.01, previously +0.06), which had been turning the grey background white.
+  - Blur is 2dp.
+  - The pattern now shows through, and text stays crisp.
+- **Light control tint** goes from 45% to 35%.
+
 ## Why guilloché
 It is monochrome, it belongs to the money domain (banknotes, cheques), it reads as print rather than as an AI gradient, and its fine regular lines are exactly what a lens bends visibly.
 

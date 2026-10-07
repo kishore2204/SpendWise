@@ -230,8 +230,8 @@ private fun <K> LiquidTabs(
                     shape = { Capsule() },
                     effects = {
                         val p = press.value
-                        // Resting: a gentle lens so the droplet reads as glass. Pressed: deeper, with colour fringing.
-                        if (refraction) lens((8f + 6f * p).dp.toPx(), (12f + 8f * p).dp.toPx(), chromaticAberration = p > 0.05f)
+                        // Resting: a gentle lens so the droplet reads as glass. Pressed: slightly deeper. No colour fringing.
+                        if (refraction) lens((6f + 4f * p).dp.toPx(), (8f + 6f * p).dp.toPx())
                     },
                     highlight = { Highlight(width = 1.dp, alpha = 0.5f + 0.5f * press.value) },
                     shadow = { Shadow(radius = 10.dp, alpha = if (colors.isDark) press.value else 0.5f + 0.5f * press.value) },
@@ -290,8 +290,8 @@ private fun LiquidPrimaryButton(label: String, onClick: () -> Unit) {
             .liquidGlass(
                 Capsule(),
                 tint = colors.primary.copy(alpha = 0.92f),
-                lensHeight = 14f,
-                lensAmount = 24f,
+                lensHeight = 10f,
+                lensAmount = 14f,
                 blurDp = 2f,
                 layerBlock = {
                     scaleX = scale.value

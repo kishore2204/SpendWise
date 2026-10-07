@@ -221,8 +221,8 @@ fun Modifier.liquidGlass(
     shape: Shape,
     kind: GlassKind = GlassKind.Control,
     tint: Color? = null,
-    lensHeight: Float = if (kind == GlassKind.Control) 26f else 20f,
-    lensAmount: Float = if (kind == GlassKind.Control) 48f else 32f,
+    lensHeight: Float = if (kind == GlassKind.Control) 16f else 12f,
+    lensAmount: Float = if (kind == GlassKind.Control) 22f else 14f,
     blurDp: Float = if (kind == GlassKind.Control) 1.5f else 2f,
     layerBlock: (GraphicsLayerScope.() -> Unit)? = null,
 ): Modifier {
@@ -242,10 +242,14 @@ fun Modifier.liquidGlass(
             shape = { shape },
             effects = {
                 if (allowed) {
-                    if (dark) colorControls(brightness = -0.04f, saturation = 1.05f)
-                    else colorControls(brightness = 0.06f, saturation = 1.05f)
+                    // Light cards must NOT brighten what's behind them, or they wash out to plain white.
+                    when {
+                        dark -> colorControls(brightness = -0.04f, saturation = 1.05f)
+                        kind == GlassKind.Control -> colorControls(brightness = 0.04f, saturation = 1.05f)
+                        else -> colorControls(brightness = -0.01f, saturation = 1.0f)
+                    }
                     blur(blurDp.dp.toPx())
-                    lens(lensHeight.dp.toPx(), lensAmount.dp.toPx(), depthEffect = kind == GlassKind.Control)
+                    lens(lensHeight.dp.toPx(), lensAmount.dp.toPx())
                 }
             },
             highlight = { Highlight(width = if (kind == GlassKind.Control) 1.5.dp else 1.dp, alpha = 1f) },
