@@ -12,6 +12,7 @@ import com.spendwise.app.data.db.entity.BalanceAnchorEntity
 import com.spendwise.app.data.db.entity.CategoryEntity
 import com.spendwise.app.data.db.entity.TransferEntity
 import com.spendwise.app.data.db.entity.TxnEntity
+import com.spendwise.app.data.db.entity.TxnSplitEntity
 import kotlinx.coroutines.flow.Flow
 
 /*
@@ -168,6 +169,19 @@ interface AccountCategoryDao {
 
 @Dao
 interface CategoryDao {
+    /** Categories visible for one account (its overlay), by kind, excluding archived and system ones. */
+    @Query(
+        """
+        SELECT c.* FROM category c JOIN account_category ac ON ac.categoryId = c.id
+        WHERE ac.accountId = :accountId AND ac.hidden = 0 AND c.archivedAt IS NULL AND c.kind = :kind
+        ORDER BY ac.sortOrder
+        """,
+    )
+    fun observeVisible(accountId: Long, kind: com.spendwise.app.data.db.entity.CategoryKind): Flow<List<CategoryEntity>>
+
+    @Query("SELECT * FROM category WHERE id = :id")
+    suspend fun getById(id: Long): CategoryEntity?
+
     @Query("SELECT * FROM category WHERE archivedAt IS NULL ORDER BY sortOrder")
     fun observeActive(): Flow<List<CategoryEntity>>
 
@@ -193,4 +207,97 @@ interface TxnDao {
     /** Σ of confirmed legs for one account — reads the view, never `txn`. */
     @Query("SELECT COALESCE(SUM(amountPaise), 0) FROM v_confirmed_txn WHERE accountId = :accountId")
     suspend fun confirmedSum(accountId: Long): Long
+
+    @androidx.room.Update
+    suspend fun update(txn: TxnEntity)
+
+    @Query("DELETE FROM txn WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("SELECT * FROM transfer WHERE fromTxnId = :txnId OR toTxnId = :txnId")
+    suspend fun transferFor(txnId: Long): TransferEntity?
+
+    @Query("SELECT COALESCE(SUM(amountPaise), 0) FROM txn WHERE refundOfId = :originalId AND status != 'IGNORED'")
+    suspend fun refundedSoFar(originalId: Long): Long
+
+    @Query("SELECT COUNT(*) FROM txn WHERE refundOfId = :originalId")
+    suspend fun refundCount(originalId: Long): Int
+
+    /** Refunds net against their original's category (ADR-004), so they follow it when it changes. */
+    @Query("UPDATE txn SET categoryId = :categoryId WHERE refundOfId = :originalId")
+    suspend fun setRefundsCategory(originalId: Long, categoryId: Long?)
+
+    // ---- Lists: always ONE account. Pending rows are listed (with a badge); ignored rows are not. ----
+
+    @Query(LIST_SELECT + " WHERE t.accountId = :accountId AND t.status != 'IGNORED' ORDER BY t.occurredAt DESC, t.id DESC")
+    fun pagedForAccount(accountId: Long): androidx.paging.PagingSource<Int, TxnRow>
+
+    @Query(LIST_SELECT + " WHERE t.accountId = :accountId AND t.status != 'IGNORED' ORDER BY t.occurredAt DESC, t.id DESC LIMIT :limit")
+    fun observeRecent(accountId: Long, limit: Int): Flow<List<TxnRow>>
+
+    @Query(LIST_SELECT + " WHERE t.id = :id")
+    fun observeRow(id: Long): Flow<TxnRow?>
+
+    // ---- Splits ----
+
+    @Query("SELECT * FROM txn_split WHERE txnId = :txnId ORDER BY id")
+    fun observeSplits(txnId: Long): Flow<List<TxnSplitEntity>>
+
+    @Query("SELECT * FROM txn_split WHERE txnId = :txnId ORDER BY id")
+    suspend fun getSplits(txnId: Long): List<TxnSplitEntity>
+
+    @Query("DELETE FROM txn_split WHERE txnId = :txnId")
+    suspend fun clearSplits(txnId: Long)
+
+    @Insert
+    suspend fun insertSplits(splits: List<TxnSplitEntity>)
+
+    companion object {
+        /** Row for lists. The counterparty is the OTHER leg's account NAME only — never its money (isolation). */
+        const val LIST_SELECT = """
+            SELECT t.id, t.accountId, t.amountPaise, t.kind, t.status, t.confidence, t.occurredAt, t.merchantRaw, t.note,
+                   t.categoryId, c.name AS categoryName, c.iconKey AS categoryIcon, t.paymentMethod, t.refundOfId,
+                   (SELECT a.nickname FROM transfer tr
+                      JOIN txn o ON o.id = CASE WHEN tr.fromTxnId = t.id THEN tr.toTxnId ELSE tr.fromTxnId END
+                      JOIN account a ON a.id = o.accountId
+                     WHERE tr.fromTxnId = t.id OR tr.toTxnId = t.id) AS counterpartyAccount,
+                   EXISTS(SELECT 1 FROM txn_split s WHERE s.txnId = t.id) AS hasSplits
+            FROM txn t LEFT JOIN category c ON c.id = t.categoryId"""
+    }
+}
+
+/** A transaction as shown in lists and detail. */
+data class TxnRow(
+    val id: Long,
+    val accountId: Long,
+    val amountPaise: Long,
+    val kind: com.spendwise.app.data.db.entity.TxnKind,
+    val status: com.spendwise.app.data.db.entity.TxnStatus,
+    val confidence: com.spendwise.app.data.db.entity.Confidence,
+    val occurredAt: Long,
+    val merchantRaw: String?,
+    val note: String?,
+    val categoryId: Long?,
+    val categoryName: String?,
+    val categoryIcon: String?,
+    val paymentMethod: com.spendwise.app.data.db.entity.PaymentMethod,
+    val refundOfId: Long?,
+    val counterpartyAccount: String?,
+    val hasSplits: Boolean,
+)
+
+/** Merchant → category rules (ADR-001). accountId 0 = global; account rules win. */
+@Dao
+interface MerchantRuleDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(rule: com.spendwise.app.data.db.entity.MerchantRuleEntity)
+
+    @Query(
+        """
+        SELECT categoryId FROM merchant_rule
+        WHERE merchantKey = :merchantKey AND accountId IN (:accountId, 0)
+        ORDER BY CASE WHEN accountId = :accountId THEN 0 ELSE 1 END LIMIT 1
+        """,
+    )
+    suspend fun lookup(accountId: Long, merchantKey: String): Long?
 }

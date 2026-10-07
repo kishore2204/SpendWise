@@ -49,6 +49,7 @@ abstract class SpendWiseDatabase : RoomDatabase() {
     abstract fun txnDao(): TxnDao
     abstract fun ledgerDao(): LedgerDao
     abstract fun accountCategoryDao(): AccountCategoryDao
+    abstract fun merchantRuleDao(): com.spendwise.app.data.db.dao.MerchantRuleDao
 
     companion object {
         const val NAME = "spendwise.db"

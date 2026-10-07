@@ -87,6 +87,7 @@ data class AccountView(
     val account: AccountEntity,
     val balance: BalanceBreakdown,
     val month: PeriodSummary,
+    val recent: List<com.spendwise.app.data.db.dao.TxnRow>,
 )
 
 sealed interface HomeUiState {
@@ -101,6 +102,7 @@ class HomeViewModel @Inject constructor(
     repository: AccountRepository,
     private val selectedStore: SelectedAccountStore,
     clock: Clock,
+    txnDao: com.spendwise.app.data.db.dao.TxnDao,
 ) : ViewModel() {
 
     private val selectedView: Flow<AccountView?> = selectedStore.selectedAccountId.flatMapLatest { id ->
@@ -112,7 +114,8 @@ class HomeViewModel @Inject constructor(
                 repository.observeAccount(id),
                 repository.observeBalance(id),
                 repository.observeThisMonth(id, clock.now()),
-            ) { account, balance, month -> account?.let { AccountView(id, it, balance, month) } }
+                txnDao.observeRecent(id, 5),
+            ) { account, balance, month, recent -> account?.let { AccountView(id, it, balance, month, recent) } }
         }
     }
 
@@ -131,6 +134,8 @@ class HomeViewModel @Inject constructor(
 fun HomeScreen(
     onAddAccount: () -> Unit,
     onManageAccounts: () -> Unit,
+    onSeeAll: () -> Unit,
+    onOpenTransaction: (Long) -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -158,11 +163,23 @@ fun HomeScreen(
                 item(key = "hero", contentType = "hero") { BalanceHero(s.selected) }
                 item(key = "recent-label") { SectionLabel("Recent transactions") }
                 item(key = "recent") {
-                    EmptyState(
-                        icon = Icons.AutoMirrored.Rounded.ReceiptLong,
-                        title = "No transactions yet",
-                        body = "Transactions for ${s.selected.account.nickname} will appear here.",
-                    )
+                    val recent = s.selected.recent
+                    if (recent.isEmpty()) {
+                        EmptyState(
+                            icon = Icons.AutoMirrored.Rounded.ReceiptLong,
+                            title = "No transactions yet",
+                            body = "Add one for ${s.selected.account.nickname} with the + button.",
+                        )
+                    } else {
+                        // One card holds all rows: glass belongs to the container, never to each row.
+                        com.spendwise.app.ui.components.GroupCard {
+                            recent.forEach { row ->
+                                com.spendwise.app.ui.components.TransactionRowView(row, onClick = { onOpenTransaction(row.id) }, showDate = true)
+                                HorizontalDivider(color = SpendWise.colors.divider, modifier = Modifier.padding(start = 68.dp))
+                            }
+                            ListRow(title = "See all transactions", onClick = onSeeAll)
+                        }
+                    }
                 }
             }
         }

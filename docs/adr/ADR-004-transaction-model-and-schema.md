@@ -107,3 +107,17 @@ Keys are deterministic. They never use the SMS provider's `_id` or autoincrement
   - The refund trigger now requires the original to be EXPENSE or FEE.
 - **Known risk for Phase 4/5: bank SMS latency.** A debit at 09:59 whose SMS is sent at 10:02 lands after an anchor the user created at 10:00 from the bank app, and would be counted twice. Mitigation: flag confirmed legs within N minutes after an anchor ("Already included in the balance you entered?"), and prefer the body time over the sent time.
 - **Open item:** "This month" on Home is computed for the month at subscription time. It refreshes on re-entry, but not live across midnight on a month's last day.
+
+## Phase 4 implementation notes (2026-10-07, from the integrity and isolation audits)
+- **The sign rule lives in one place:** `signedFor(kind, magnitude)` in `TransactionLedger.kt`. Entries, transfers and edits all use it.
+- **Transfer legs store no merchant.** The other side is shown by account name only (`TxnRow.counterpartyAccount`), so a transfer can never appear as a "merchant".
+- **Refunds:**
+  - Only CONFIRMED EXPENSE or FEE can be refunded.
+  - The cap is checked against the ORIGINAL, both when a refund is added and when it is edited.
+  - A refund always carries its original's category, or the largest split's. It follows that category when the original is recategorised, split or unsplit.
+  - Refunds can't be split, and the UI offers no Edit for them (delete and re-add instead).
+- **Splits:**
+  - Only EXPENSE, INCOME or FEE can be split.
+  - Changing the amount clears the splits, and the transaction falls back to the largest part's category, never "Uncategorised".
+  - `txn_split` has no `accountId`. Any per-category analytics over splits MUST join `v_confirmed_txn` and filter on its `accountId`.
+- **Detail-screen writes** are guarded against double submission.

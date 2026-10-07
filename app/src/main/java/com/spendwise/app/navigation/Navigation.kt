@@ -36,6 +36,8 @@ import com.spendwise.app.feature.accounts.AccountDetailScreen
 import com.spendwise.app.feature.accounts.AccountsScreen
 import com.spendwise.app.feature.accounts.AddAccountScreen
 import com.spendwise.app.feature.add.AddTransactionScreen
+import com.spendwise.app.feature.transactions.TransactionDetailScreen
+import com.spendwise.app.feature.transactions.TransactionsScreen
 import com.spendwise.app.feature.home.HomeScreen
 import com.spendwise.app.feature.insights.InsightsScreen
 import com.spendwise.app.feature.settings.MoreScreen
@@ -52,7 +54,9 @@ import kotlinx.serialization.Serializable
 @Serializable data object AccountsRoute : NavKey
 @Serializable data object InsightsRoute : NavKey
 @Serializable data object MoreRoute : NavKey
-@Serializable data object AddTransactionRoute : NavKey
+@Serializable data class AddTransactionRoute(val editId: Long? = null) : NavKey
+@Serializable data object TransactionsRoute : NavKey
+@Serializable data class TransactionDetailRoute(val txnId: Long) : NavKey
 @Serializable data object AddAccountRoute : NavKey
 @Serializable data class AccountDetailRoute(val accountId: Long) : NavKey
 
@@ -92,7 +96,7 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
                     items = TopLevelItems,
                     selected = currentTab,
                     onSelect = { backStack.switchTab(it) },
-                    onPrimaryAction = { backStack.add(AddTransactionRoute) },
+                    onPrimaryAction = { backStack.add(AddTransactionRoute()) },
                     primaryActionLabel = "Add expense",
                 )
             }
@@ -126,6 +130,8 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
                         HomeScreen(
                             onAddAccount = { backStack.add(AddAccountRoute) },
                             onManageAccounts = { backStack.switchTab(AccountsRoute) },
+                            onSeeAll = { backStack.add(TransactionsRoute) },
+                            onOpenTransaction = { backStack.add(TransactionDetailRoute(it)) },
                         )
                     }
                     entry<AccountsRoute> {
@@ -148,7 +154,22 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
                     }
                     entry<InsightsRoute> { InsightsScreen() }
                     entry<MoreRoute> { MoreScreen() }
-                    entry<AddTransactionRoute> { AddTransactionScreen(onClose = { backStack.removeLastOrNull() }) }
+                    entry<AddTransactionRoute> { key ->
+                        AddTransactionScreen(onClose = { backStack.removeLastOrNull() }, editId = key.editId)
+                    }
+                    entry<TransactionsRoute> {
+                        TransactionsScreen(
+                            onClose = { backStack.removeLastOrNull() },
+                            onOpen = { backStack.add(TransactionDetailRoute(it)) },
+                        )
+                    }
+                    entry<TransactionDetailRoute> { key ->
+                        TransactionDetailScreen(
+                            txnId = key.txnId,
+                            onClose = { backStack.removeLastOrNull() },
+                            onEdit = { backStack.add(AddTransactionRoute(editId = it)) },
+                        )
+                    }
                 },
             )
         }
