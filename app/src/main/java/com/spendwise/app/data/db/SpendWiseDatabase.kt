@@ -3,7 +3,9 @@ package com.spendwise.app.data.db
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.spendwise.app.data.db.dao.AccountCategoryDao
 import com.spendwise.app.data.db.dao.AccountDao
+import com.spendwise.app.data.db.dao.LedgerDao
 import com.spendwise.app.data.db.dao.CategoryDao
 import com.spendwise.app.data.db.dao.TxnDao
 import com.spendwise.app.data.db.entity.AccountCategoryEntity
@@ -45,6 +47,8 @@ abstract class SpendWiseDatabase : RoomDatabase() {
     abstract fun accountDao(): AccountDao
     abstract fun categoryDao(): CategoryDao
     abstract fun txnDao(): TxnDao
+    abstract fun ledgerDao(): LedgerDao
+    abstract fun accountCategoryDao(): AccountCategoryDao
 
     companion object {
         const val NAME = "spendwise.db"

@@ -94,3 +94,16 @@ Keys are deterministic. They never use the SMS provider's `_id` or autoincrement
 ## Revisit if
 - A bank reuses a ref in the same direction on the same account.
 - The balance SUM takes more than 16 ms on the device at 50k rows. If so, add monthly snapshots.
+
+## Phase 3 implementation notes (2026-10-07, from the integrity and isolation audits)
+- **Credit-card sign rule lives in one place:** `AccountLedger.storedBalance`. For a card, the user enters what they OWE (positive), and it is stored negative. This applies to create, edit and reconcile alike.
+- **Anchors are append-only in SQL.** The triggers `trg_anchor_no_update` and `trg_anchor_no_delete` enforce it, and they are dropped and recreated on every open so a changed rule always replaces the installed one.
+- **A new anchor is always the latest:** `effectiveAt = max(now, latest.effectiveAt + 1)`. This means a clock that went backwards can't silently hide an edit.
+- **Ties:** a leg with `occurredAt == anchor.effectiveAt` counts as *covered* by the anchor. The displayed balance, the account list and the adjustment history all use the same rule.
+- **Month summary (net):**
+  - Income = INCOME + INTEREST − reversals of money in.
+  - Spent = EXPENSE + FEE − REFUND − reversals of money out.
+  - Spent may be negative, which the UI shows as a net credit.
+  - The refund trigger now requires the original to be EXPENSE or FEE.
+- **Known risk for Phase 4/5: bank SMS latency.** A debit at 09:59 whose SMS is sent at 10:02 lands after an anchor the user created at 10:00 from the bank app, and would be counted twice. Mitigation: flag confirmed legs within N minutes after an anchor ("Already included in the balance you entered?"), and prefer the body time over the sent time.
+- **Open item:** "This month" on Home is computed for the month at subscription time. It refreshes on re-entry, but not live across midnight on a month's last day.

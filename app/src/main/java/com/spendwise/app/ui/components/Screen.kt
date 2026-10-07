@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -96,7 +97,8 @@ fun LargeTitleScreen(
 
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxSize(),
+        // imePadding: the app is edge-to-edge, so the keyboard must shrink the list or it covers form fields.
+        modifier = modifier.fillMaxSize().imePadding(),
         contentPadding = PaddingValues(
             top = statusBar,
             bottom = navBar + if (reserveBottomBar) BottomBarReservedHeight else Spacing.lg,

@@ -8,7 +8,9 @@ import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import com.spendwise.app.data.db.SpendWiseDatabase
+import com.spendwise.app.data.db.dao.AccountCategoryDao
 import com.spendwise.app.data.db.dao.AccountDao
+import com.spendwise.app.data.db.dao.LedgerDao
 import com.spendwise.app.data.db.dao.CategoryDao
 import com.spendwise.app.data.db.dao.TxnDao
 import dagger.Module
@@ -35,6 +37,12 @@ object DataModule {
     @Provides fun accountDao(db: SpendWiseDatabase): AccountDao = db.accountDao()
     @Provides fun categoryDao(db: SpendWiseDatabase): CategoryDao = db.categoryDao()
     @Provides fun txnDao(db: SpendWiseDatabase): TxnDao = db.txnDao()
+    @Provides fun ledgerDao(db: SpendWiseDatabase): LedgerDao = db.ledgerDao()
+    @Provides fun accountCategoryDao(db: SpendWiseDatabase): AccountCategoryDao = db.accountCategoryDao()
+
+    @Provides
+    @Singleton
+    fun provideClock(): com.spendwise.app.core.time.Clock = com.spendwise.app.core.time.Clock { System.currentTimeMillis() }
 
     @Provides
     @Singleton

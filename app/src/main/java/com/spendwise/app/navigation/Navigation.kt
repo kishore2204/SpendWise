@@ -32,7 +32,9 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.spendwise.app.AppViewModel
+import com.spendwise.app.feature.accounts.AccountDetailScreen
 import com.spendwise.app.feature.accounts.AccountsScreen
+import com.spendwise.app.feature.accounts.AddAccountScreen
 import com.spendwise.app.feature.add.AddTransactionScreen
 import com.spendwise.app.feature.home.HomeScreen
 import com.spendwise.app.feature.insights.InsightsScreen
@@ -51,6 +53,8 @@ import kotlinx.serialization.Serializable
 @Serializable data object InsightsRoute : NavKey
 @Serializable data object MoreRoute : NavKey
 @Serializable data object AddTransactionRoute : NavKey
+@Serializable data object AddAccountRoute : NavKey
+@Serializable data class AccountDetailRoute(val accountId: Long) : NavKey
 
 private val TopLevelItems = listOf(
     BottomBarItem<NavKey>(HomeRoute, "Home", Icons.Outlined.Home, Icons.Rounded.Home),
@@ -118,8 +122,30 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
                         fadeOut(tween(motion.duration(motion.short)))
                 },
                 entryProvider = entryProvider {
-                    entry<HomeRoute> { HomeScreen(onAddAccount = { backStack.switchTab(AccountsRoute) }) }
-                    entry<AccountsRoute> { AccountsScreen() }
+                    entry<HomeRoute> {
+                        HomeScreen(
+                            onAddAccount = { backStack.add(AddAccountRoute) },
+                            onManageAccounts = { backStack.switchTab(AccountsRoute) },
+                        )
+                    }
+                    entry<AccountsRoute> {
+                        AccountsScreen(
+                            onAddAccount = { backStack.add(AddAccountRoute) },
+                            onOpenAccount = { backStack.add(AccountDetailRoute(it)) },
+                        )
+                    }
+                    entry<AddAccountRoute> {
+                        AddAccountScreen(
+                            onClose = { backStack.removeLastOrNull() },
+                            onCreated = { id ->
+                                backStack.removeLastOrNull()
+                                backStack.add(AccountDetailRoute(id))
+                            },
+                        )
+                    }
+                    entry<AccountDetailRoute> { key ->
+                        AccountDetailScreen(accountId = key.accountId, onClose = { backStack.removeLastOrNull() })
+                    }
                     entry<InsightsRoute> { InsightsScreen() }
                     entry<MoreRoute> { MoreScreen() }
                     entry<AddTransactionRoute> { AddTransactionScreen(onClose = { backStack.removeLastOrNull() }) }

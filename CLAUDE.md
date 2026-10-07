@@ -36,6 +36,8 @@ This file holds the **non-negotiable rules**. Detailed knowledge lives in `docs/
 - The sum of a split's parts equals the parent amount, exactly, in paise.
 - Balances are computed, never cached, from **anchors** (ADR-004): displayed = latest anchor + Σ confirmed legs after it. A manual edit or reconcile appends an anchor; it never edits or deletes transactions. Imported history before an anchor can't change today's balance.
 - All balance/analytics queries read the `v_confirmed_txn` view — never the raw `txn` table.
+- Credit cards: the user enters what they OWE; `AccountLedger.storedBalance` stores it negative (create, edit, reconcile). Never re-implement that sign rule elsewhere.
+- `balance_anchor` is append-only (SQL triggers). Write anchors only through `AccountLedger`.
 - Duplicates are rejected. The same transaction can arrive via SMS, notification, historical import and pull-to-refresh, and must still produce exactly one record.
 - Uncertain parses (anything below high confidence) go to review. They are never auto-confirmed.
 

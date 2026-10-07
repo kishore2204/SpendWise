@@ -29,11 +29,12 @@ object DatabaseSetup {
                    OR (NEW.kind IN ($POSITIVE_KINDS) AND NEW.amountPaise < 0);
             SELECT RAISE(ABORT, 'txn: isCredit must match sign')
                 WHERE NEW.isCredit != (NEW.amountPaise > 0);
-            SELECT RAISE(ABORT, 'txn: refund must be in the same account with the opposite sign')
+            SELECT RAISE(ABORT, 'txn: refund must be of spending in the same account with the opposite sign')
                 WHERE NEW.refundOfId IS NOT NULL AND NOT EXISTS (
                     SELECT 1 FROM txn o
                     WHERE o.id = NEW.refundOfId
                       AND o.accountId = NEW.accountId
+                      AND o.kind IN ('EXPENSE','FEE')
                       AND (o.amountPaise > 0) != (NEW.amountPaise > 0)
                 );
         END
@@ -53,14 +54,33 @@ object DatabaseSetup {
         END
     """.trimIndent()
 
+    // Balance history is append-only (ADR-004): edits and reconciles add anchors; nothing may rewrite or erase one.
+    private const val ANCHOR_NO_UPDATE = """
+        CREATE TRIGGER IF NOT EXISTS trg_anchor_no_update BEFORE UPDATE ON balance_anchor
+        BEGIN SELECT RAISE(ABORT, 'balance_anchor is append-only'); END
+    """
+    private const val ANCHOR_NO_DELETE = """
+        CREATE TRIGGER IF NOT EXISTS trg_anchor_no_delete BEFORE DELETE ON balance_anchor
+        BEGIN SELECT RAISE(ABORT, 'balance_anchor is append-only'); END
+    """
+
+    private val TRIGGER_NAMES = listOf(
+        "trg_txn_check_INSERT", "trg_txn_check_UPDATE", "trg_transfer_check_INSERT", "trg_transfer_check_UPDATE",
+        "trg_anchor_no_update", "trg_anchor_no_delete",
+    )
+
     val TRIGGERS: List<String> = listOf(
         txnChecks("INSERT"),
         txnChecks("UPDATE"),
         transferChecks("INSERT"),
         transferChecks("UPDATE"),
+        ANCHOR_NO_UPDATE,
+        ANCHOR_NO_DELETE,
     )
 
+    /** Drops and recreates every trigger on each open, so a changed rule always replaces the installed one. */
     fun createTriggers(db: SupportSQLiteDatabase) {
+        TRIGGER_NAMES.forEach { db.execSQL("DROP TRIGGER IF EXISTS $it") }
         TRIGGERS.forEach(db::execSQL)
     }
 
