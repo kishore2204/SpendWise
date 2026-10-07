@@ -55,8 +55,8 @@ fun GroupCard(
         modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.screen)
-            .liquidGlass(RoundedRectangle(Radius.group), GlassKind.Card)
-            .clip(RoundedRectangle(Radius.group)),
+            .liquidGlass(RoundedCornerShape(Radius.group), GlassKind.Card)
+            .clip(RoundedCornerShape(Radius.group)),
         content = content,
     )
 }
@@ -129,7 +129,7 @@ fun EmptyState(
         modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.screen)
-            .liquidGlass(RoundedRectangle(Radius.card), GlassKind.Card)
+            .liquidGlass(RoundedCornerShape(Radius.card), GlassKind.Card)
             .padding(horizontal = Spacing.lg, vertical = Spacing.xl),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

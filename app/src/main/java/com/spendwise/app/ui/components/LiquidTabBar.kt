@@ -285,10 +285,11 @@ private fun LiquidPrimaryButton(label: String, onClick: () -> Unit) {
     Box(
         Modifier
             .size(64.dp)
-            // Same neutral glass as the tab bar; the accent lives only in the glyph. Scale lives in the glass
-            // layer, so pressing grows the glass instead of distorting what it samples.
+            // Light-lavender glass: the same glass as the tab bar, tinted with the accent. Scale lives in the
+            // glass layer, so pressing grows the glass instead of distorting what it samples.
             .liquidGlass(
                 Capsule(),
+                tint = colors.accentGlass,
                 lensHeight = 14f,
                 lensAmount = 20f,
                 layerBlock = {
@@ -303,6 +304,6 @@ private fun LiquidPrimaryButton(label: String, onClick: () -> Unit) {
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Rounded.Add, contentDescription = null, tint = colors.primary, modifier = Modifier.size(30.dp))
+        Icon(Icons.Rounded.Add, contentDescription = null, tint = colors.onAccentGlass, modifier = Modifier.size(30.dp))
     }
 }

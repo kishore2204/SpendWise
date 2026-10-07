@@ -49,6 +49,8 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.highlight.HighlightStyle
+import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.RoundedRectangle
 import com.spendwise.app.ui.theme.Radius
@@ -221,8 +223,8 @@ fun Modifier.liquidGlass(
     shape: Shape,
     kind: GlassKind = GlassKind.Control,
     tint: Color? = null,
-    lensHeight: Float = if (kind == GlassKind.Control) 16f else 12f,
-    lensAmount: Float = if (kind == GlassKind.Control) 22f else 14f,
+    lensHeight: Float = if (kind == GlassKind.Control) 18f else 12f,
+    lensAmount: Float = if (kind == GlassKind.Control) 26f else 14f,
     blurDp: Float = if (kind == GlassKind.Control) 1.5f else 2f,
     layerBlock: (GraphicsLayerScope.() -> Unit)? = null,
 ): Modifier {
@@ -249,10 +251,32 @@ fun Modifier.liquidGlass(
                         else -> colorControls(brightness = -0.01f, saturation = 1.0f)
                     }
                     blur(blurDp.dp.toPx())
-                    lens(lensHeight.dp.toPx(), lensAmount.dp.toPx())
+                    // depthEffect thickens the refraction toward the rim, so the edge visibly bends light.
+                    lens(lensHeight.dp.toPx(), lensAmount.dp.toPx(), depthEffect = kind == GlassKind.Control)
                 }
             },
-            highlight = { Highlight(width = if (kind == GlassKind.Control) 1.5.dp else 1.dp, alpha = 1f) },
+            // Directional specular rim: light from the top-left catches the curved edge, strongest where the
+            // rim faces the light and fading round the far side — the iOS-style edge glint.
+            highlight = {
+                Highlight(
+                    width = if (kind == GlassKind.Control) 2.dp else 1.5.dp,
+                    blurRadius = 1.dp,
+                    alpha = 1f,
+                    style = HighlightStyle.Default(
+                        color = Color.White.copy(alpha = if (dark) 0.75f else 1f),
+                        angle = 45f,
+                        falloff = 0.7f,
+                    ),
+                )
+            },
+            // Inner glow: light refracted just inside the rim gives the glass visible thickness.
+            innerShadow = {
+                InnerShadow(
+                    radius = if (kind == GlassKind.Control) 10.dp else 8.dp,
+                    offset = DpOffset(0.dp, 0.dp),
+                    color = if (dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.42f),
+                )
+            },
             shadow = {
                 if (dark) Shadow(radius = 20.dp, offset = DpOffset(0.dp, 6.dp), color = Color.Black.copy(alpha = 0.5f))
                 else Shadow(radius = 18.dp, offset = DpOffset(0.dp, 6.dp), color = colors.shadow)

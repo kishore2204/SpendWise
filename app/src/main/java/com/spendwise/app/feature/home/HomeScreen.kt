@@ -26,7 +26,7 @@ import androidx.lifecycle.viewModelScope
 import com.spendwise.app.core.time.IndiaTime
 import com.spendwise.app.data.db.dao.AccountDao
 import com.spendwise.app.ui.components.LargeTitleScreen
-import com.kyant.shapes.RoundedRectangle
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.spendwise.app.ui.glass.GlassKind
 import com.spendwise.app.ui.glass.liquidGlass
 import com.spendwise.app.ui.theme.Radius
@@ -78,7 +78,7 @@ private fun StartCard(onAddAccount: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.screen)
-            .liquidGlass(RoundedRectangle(Radius.card), GlassKind.Card)
+            .liquidGlass(RoundedCornerShape(Radius.card), GlassKind.Card)
             .padding(Spacing.lg),
     ) {
         Text("No accounts yet", style = MaterialTheme.typography.titleLarge, color = colors.text1)

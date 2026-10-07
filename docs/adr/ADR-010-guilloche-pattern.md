@@ -26,6 +26,13 @@ The user said *"the dispersion is too much"* and *"light cards are too white, wh
   - The pattern now shows through, and text stays crisp.
 - **Light control tint** goes from 45% to 35%.
 
+## iOS-style edges + lavender "+" (user request)
+- **Directional specular rim:** `HighlightStyle.Default`, light from the top-left at 45°, falloff 0.7. Width is 2dp on controls and 1.5dp on cards. The edge glints where it faces the light and fades round the far side.
+- **Inner glow** (`InnerShadow` in white): 10%/10dp in dark, 42% in light. Light refracted just inside the rim gives the glass visible thickness.
+- **Controls regain `depthEffect`.** The lens is 18/26dp, so refraction thickens toward the rim without the old heavy distortion.
+- **Cards use Compose `RoundedCornerShape`** because Kyant 2.0.1's highlight shader only reads corner radii from `CornerBasedShape`. With other shapes it fell back to capsule radii.
+- **"+" is light-lavender glass:** `accentGlass` is dark #C4B9FF at 75% and light #C9BEFF at 70%, with a deep-violet glyph (`onAccentGlass`).
+
 ## Why guilloché
 It is monochrome, it belongs to the money domain (banknotes, cheques), it reads as print rather than as an AI gradient, and its fine regular lines are exactly what a lens bends visibly.
 

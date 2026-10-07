@@ -36,6 +36,10 @@ data class SpendWiseColors(
     val glassHairline: Color,
     /** Resting selection droplet fill. */
     val droplet: Color,
+    /** Lavender glass tint for the primary floating action (+). */
+    val accentGlass: Color,
+    /** Glyph on the lavender glass. */
+    val onAccentGlass: Color,
     val primary: Color,
     val onPrimary: Color,
     val primaryContainer: Color,
@@ -72,6 +76,8 @@ val DarkColors = SpendWiseColors(
     glassHighlightBottom = Color(0x0AFFFFFF),
     glassHairline = Color(0x1AFFFFFF),
     droplet = Color(0x1FFFFFFF),
+    accentGlass = Color(0xBFC4B9FF),
+    onAccentGlass = Color(0xFF241A5C),
     primary = Color(0xFFA99BFF),
     onPrimary = Color(0xFF121218),
     primaryContainer = Color(0x29A99BFF),
@@ -105,6 +111,8 @@ val LightColors = SpendWiseColors(
     glassHighlightBottom = Color(0x66FFFFFF),
     glassHairline = Color(0x1A111117),
     droplet = Color(0xE6FFFFFF),
+    accentGlass = Color(0xB3C9BEFF),
+    onAccentGlass = Color(0xFF3F2AB5),
     primary = Color(0xFF5038C8),
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0x1F5038C8),
@@ -143,6 +151,8 @@ fun lerp(from: SpendWiseColors, to: SpendWiseColors, fraction: Float): SpendWise
         glassHighlightBottom = c(from.glassHighlightBottom, to.glassHighlightBottom),
         glassHairline = c(from.glassHairline, to.glassHairline),
         droplet = c(from.droplet, to.droplet),
+        accentGlass = c(from.accentGlass, to.accentGlass),
+        onAccentGlass = c(from.onAccentGlass, to.onAccentGlass),
         primary = c(from.primary, to.primary),
         onPrimary = c(from.onPrimary, to.onPrimary),
         primaryContainer = c(from.primaryContainer, to.primaryContainer),
