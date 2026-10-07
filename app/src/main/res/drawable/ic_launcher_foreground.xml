@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original mark: an open ring (a "spend gauge") with a single accent dot. Safe zone: 66dp circle. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path
+        android:pathData="M54,32 A22,22 0 1,1 32.9,60.2"
+        android:strokeColor="#B7A6FF" android:strokeWidth="7"
+        android:strokeLineCap="round" android:fillColor="#00000000" />
+    <path
+        android:pathData="M33,49.5 m-4.5,0 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0"
+        android:fillColor="#4FD1B0" />
+</vector>
