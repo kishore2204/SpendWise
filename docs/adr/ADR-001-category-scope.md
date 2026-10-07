@@ -1,5 +1,5 @@
 # ADR-001: Category scope and merchant-rule learning
-- Status: Accepted. The default for merchant-rule learning is pending user confirmation (see "Open question").
+- Status: Accepted
 - Date: 2026-10-07
 - Council: Android Architect, Security & Data Engineer, Product/UX Architect, Devil's Advocate, Simplicity Champion, Performance Optimizer
 
@@ -31,7 +31,7 @@ Merchant rules split 3–3. This is a preference question, not an engineering fa
 - **A per-account overlay:** `AccountCategory(accountId, categoryId, hidden, sortOrder)`. Each account can show, hide and order its own set. This keeps the spirit of "each account has its own categories" without copying them.
 - **Two-level merchant rules:** `MerchantRule(accountId, merchantKey, categoryId)` with `UNIQUE(accountId, merchantKey)`. **`accountId = 0` is a sentinel meaning global.** We never use NULL.
   - Lookup order: the account's own rule → the global rule → the shipped default dictionary (Swiggy→Food, Uber→Transport…).
-  - The correction sheet offers "This account only" or "All accounts".
+  - The correction sheet offers "All accounts" (**default — confirmed by the user 2026-10-07**) or "This account only".
 - Budgets, analytics, insights and recurring items are keyed by `(accountId, categoryId)` and are never aggregated across accounts.
 
 ## Why
@@ -49,8 +49,8 @@ The two-level rule table supports both learning preferences with one schema. Whi
 - New accounts get an overlay with every non-system category visible.
 - Backup and restore write a single category table. No per-account remapping.
 
-## Open question for the user
-When you correct a merchant's category, should it apply to **all accounts by default** ("teach once"), or to **this account only by default** (strict isolation)? The schema supports both. The current default is "This account only", because it matches the spirit of the spec most closely.
+## User decision (2026-10-07)
+Corrections apply to **all accounts** by default ("teach once"). "This account only" stays available as an override, so a merchant that genuinely means different things in different accounts can still be handled.
 
 ## Revisit if
 - The user wants categories with the same name to mean different things in different accounts (e.g. a business account). In that case, adopt option 3 using the `0` sentinel, not NULL.

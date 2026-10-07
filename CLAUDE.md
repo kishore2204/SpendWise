@@ -6,6 +6,7 @@ This file holds the **non-negotiable rules**. Detailed knowledge lives in `docs/
 ## Target
 
 - Device: Samsung, **Android 16 / One UI 8.5**. Sideloaded APK only — never published to Google Play.
+- The user's accounts today: **Indian Bank** and **HDFC** (+ a Cash wallet). Verified real samples: Indian Bank UPI debit, HDFC UPI debit (`docs/sms/samples/`). Other templates come from public patterns and are capped at NEEDS_REVIEW until real samples verify them.
 - Stack: Kotlin, Coroutines/Flow/StateFlow, Jetpack Compose + Material 3, Room, WorkManager (deferred work only), Vico charts.
 - Single Gradle `app` module, organized by package. No multi-module split in V1.
 - Build JDK: Android Studio's bundled JBR (`C:\Program Files\Android\Android Studio\jbr`). The system `java` on PATH is JDK 22 — do not use it for Gradle.
@@ -33,7 +34,8 @@ This file holds the **non-negotiable rules**. Detailed knowledge lives in `docs/
 - An ATM withdrawal into the Cash account is a transfer (bank → Cash).
 - A refund links to its original transaction; analytics show the net effect.
 - The sum of a split's parts equals the parent amount, exactly, in paise.
-- Displayed balance = calculated balance + sum of balance adjustments. A manual balance edit creates an adjustment record; it never edits or deletes transactions.
+- Balances are computed, never cached, from **anchors** (ADR-004): displayed = latest anchor + Σ confirmed legs after it. A manual edit or reconcile appends an anchor; it never edits or deletes transactions. Imported history before an anchor can't change today's balance.
+- All balance/analytics queries read the `v_confirmed_txn` view — never the raw `txn` table.
 - Duplicates are rejected. The same transaction can arrive via SMS, notification, historical import and pull-to-refresh, and must still produce exactly one record.
 - Uncertain parses (anything below high confidence) go to review. They are never auto-confirmed.
 
@@ -41,13 +43,15 @@ This file holds the **non-negotiable rules**. Detailed knowledge lives in `docs/
 
 - New messages are handled event-driven (`SMS_RECEIVED` broadcast). Never scan the inbox continuously or on a timer.
 - Inbox reads happen only (a) once during the historical import the user starts, and (b) on pull-to-refresh.
-- Pull-to-refresh processes relevant SMS newer than the last-processed watermark. The unread flag is only a hint, because Samsung Messages marks messages read when they're opened.
+- Pull-to-refresh re-reads allowlisted senders from `lastProcessedDate − 72h`; the message fingerprint makes it idempotent. Never rely on the unread flag or `_id`.
+- Only allowlisted DLT senders can create transactions. Financial-looking SMS that no template matches go to "Couldn't read" — never silently dropped.
+- Transfers between own accounts are suggested, never auto-paired.
 - Parsing must never crash the app. A malformed or unknown SMS becomes "unparsed", not an exception.
 - Parsers are modular: a generic parser plus one parser per bank under `transaction/bankparsers/<bank>/`. Add a bank with `/add-bank-parser`.
 
 ## Privacy
 
-- Financial data stays on the device. No backend, no analytics SDKs, no crash reporters that upload data.
+- Financial data stays on the device. **The manifest has no `INTERNET` permission.** No backend, no analytics SDKs, no crash reporters.
 - `android:allowBackup="false"` **plus** `dataExtractionRules` excluding everything (incl. device-transfer). Backups are user-initiated files encrypted with a user passphrase — never Keystore-dependent. See ADR-002.
 - The daily-use build is release (`debuggable=false`); debug uses the `.debug` applicationId and test data only.
 - Never log SMS bodies, amounts or account numbers. No amounts in lock-screen notifications.
