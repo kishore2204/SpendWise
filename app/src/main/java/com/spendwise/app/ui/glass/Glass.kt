@@ -27,6 +27,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Canvas
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.ImageBitmapConfig
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.DpOffset
@@ -44,9 +53,19 @@ import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.RoundedRectangle
 import com.spendwise.app.ui.theme.Radius
 import com.spendwise.app.ui.theme.SpendWise
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sin
 
 /*
- * Glass system (ADR-009, revises ADR-008).
+ * Glass system (ADR-010: guilloché pattern so glass is visible; builds on ADR-009's calm palette).
+ *
+ *  - A fine monochrome guilloché line field (banknote-style security print) sits behind everything. Glass
+ *    refracts those lines at its curved edges, so it reads as glass even on empty screens — without hue.
+ *  - Floating controls refract background + content; content cards refract the background only.
+ *
+ * Earlier notes (ADR-009):
  *
  *  - Glass lives ONLY on the floating layer — tab bar, "+" button, top bar — where it refracts the real content
  *    scrolling underneath. That is when glass actually reads as glass (iOS does the same).
@@ -61,6 +80,16 @@ import com.spendwise.app.ui.theme.SpendWise
 
 /** Background + screen content. Sampled by floating controls drawn above the content. */
 val LocalContentBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+
+/** Background (tone + guilloché) only. Sampled by glass that lives inside scrolling content. */
+val LocalBackgroundBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+
+enum class GlassKind {
+    /** Floating controls (tab bar, "+", pills): clear, strong lens, refract background + content. */
+    Control,
+    /** Content cards: more tint so text stays >= 4.5:1; refract the background pattern. */
+    Card,
+}
 
 /** Whether refraction/blur is allowed right now. */
 val LocalBlurAllowed = staticCompositionLocalOf { true }
@@ -86,17 +115,19 @@ fun GlassScaffold(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val contentBackdrop = rememberLayerBackdrop()
+    val backgroundBackdrop = rememberLayerBackdrop()
     val topBar = remember { GlassTopBarState() }
     val blurAllowed = rememberBlurAllowed(reduceTransparency)
 
     CompositionLocalProvider(
         LocalContentBackdrop provides contentBackdrop,
+        LocalBackgroundBackdrop provides backgroundBackdrop,
         LocalBlurAllowed provides blurAllowed,
         LocalGlassTopBar provides topBar,
     ) {
         Box(modifier.fillMaxSize().background(SpendWise.colors.background)) {
             Box(Modifier.fillMaxSize().layerBackdrop(contentBackdrop)) {
-                NeutralBackground(Modifier.fillMaxSize())
+                NeutralBackground(Modifier.fillMaxSize().layerBackdrop(backgroundBackdrop))
                 content()
             }
             overlay()
@@ -104,43 +135,106 @@ fun GlassScaffold(
     }
 }
 
-/** Neutral background: flat tone with one soft light from the top. No hue. Static. */
+/**
+ * Neutral background: flat tone, one soft light from the top, and a monochrome guilloché line field —
+ * concentric rings with a sine "rosette" modulation, like banknote security printing. Static and cached:
+ * the path is built once per size.
+ */
 @Composable
 fun NeutralBackground(modifier: Modifier = Modifier) {
     val c = SpendWise.colors
+    // The guilloché is ~60k path segments: rasterise it ONCE per size into an alpha mask, then every frame just
+    // draws that bitmap tinted with the theme colour (cheap, and theme crossfades never re-rasterise).
+    val mask = remember { PatternMaskCache() }
     Box(
-        modifier
-            .background(c.background)
-            .drawBehind {
-                drawRect(
-                    Brush.radialGradient(
-                        colors = listOf(c.backgroundLight, c.backgroundLight.copy(alpha = 0f)),
-                        center = Offset(size.width * 0.3f, -size.height * 0.05f),
-                        radius = size.maxDimension * 0.75f,
-                    ),
-                )
-            },
+        modifier.drawBehind {
+            val light = Brush.radialGradient(
+                colors = listOf(c.backgroundLight, c.backgroundLight.copy(alpha = 0f)),
+                center = Offset(size.width * 0.3f, -size.height * 0.05f),
+                radius = size.maxDimension * 0.75f,
+            )
+            drawRect(c.background)
+            drawRect(light)
+            drawImage(mask.get(this), colorFilter = ColorFilter.tint(c.pattern))
+        },
     )
 }
 
+/** Holds the rasterised guilloché mask; rebuilt only when the drawing size changes. */
+private class PatternMaskCache {
+    private var bitmap: ImageBitmap? = null
+    private var cachedSize = Size.Zero
+
+    fun get(scope: DrawScope): ImageBitmap {
+        val size = scope.size
+        bitmap?.let { if (size == cachedSize) return it }
+        val w = size.width.toInt().coerceAtLeast(1)
+        val h = size.height.toInt().coerceAtLeast(1)
+        val image = ImageBitmap(w, h, ImageBitmapConfig.Alpha8)
+        val path = with(scope) { guillochePath(size.width, size.height, spacing = 12.dp.toPx(), amplitude = 3.dp.toPx()) }
+        val strokePx = with(scope) { 1.dp.toPx() }
+        CanvasDrawScope().draw(scope, scope.layoutDirection, Canvas(image), size) {
+            drawPath(path, Color.White, style = Stroke(width = strokePx))
+        }
+        bitmap = image
+        cachedSize = size
+        return image
+    }
+}
+
+/** Concentric rings centred off-screen top-right; radius wobbles with 28 petals, phase drifting per ring. */
+private fun guillochePath(width: Float, height: Float, spacing: Float, amplitude: Float): Path {
+    val path = Path()
+    val cx = width * 1.05f
+    val cy = height * 0.12f
+    val maxR = hypot(cx, height - cy) + amplitude
+    val petals = 28
+    // Near the centre the rings are short, so a fixed petal count would zig-zag; fade the wave in with radius.
+    val calmRadius = width * 0.45f
+    var r = spacing * 2
+    var ring = 0
+    while (r < maxR) {
+        val steps = (2 * PI * r / 5f).toInt().coerceIn(120, 900)
+        val phase = ring * 0.32f
+        val amp = amplitude * (r / calmRadius).coerceAtMost(1f).let { it * it }
+        for (i in 0..steps) {
+            val t = (i.toFloat() / steps) * 2f * PI.toFloat()
+            val rr = r + amp * sin(petals * t + phase)
+            val x = cx + rr * cos(t)
+            val y = cy + rr * sin(t)
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        r += spacing
+        ring++
+    }
+    return path
+}
+
 /**
- * Liquid glass for FLOATING CONTROLS only. Neutral tint, light blur, clear lens at the rim, specular highlight,
+ * Liquid glass. Control kind for floating controls; Card kind for content cards. Neutral tint, light blur, clear lens at the rim, specular highlight,
  * hairline edge and shadow. [layerBlock] transforms the glass itself (e.g. press scale) without distorting
  * what it samples.
  */
 @Composable
 fun Modifier.liquidGlass(
     shape: Shape,
+    kind: GlassKind = GlassKind.Control,
     tint: Color? = null,
-    lensHeight: Float = 24f,
-    lensAmount: Float = 40f,
-    blurDp: Float = 6f,
+    lensHeight: Float = if (kind == GlassKind.Control) 26f else 20f,
+    lensAmount: Float = if (kind == GlassKind.Control) 48f else 32f,
+    blurDp: Float = if (kind == GlassKind.Control) 1.5f else 2f,
     layerBlock: (GraphicsLayerScope.() -> Unit)? = null,
 ): Modifier {
     val colors = SpendWise.colors
-    val backdrop = LocalContentBackdrop.current ?: return glassFallback(shape)
+    val backdrop = (if (kind == GlassKind.Control) LocalContentBackdrop.current else LocalBackgroundBackdrop.current)
+        ?: return glassFallback(shape)
     val allowed = LocalBlurAllowed.current
-    val fill = tint ?: if (allowed) colors.glassTint else colors.glassTintFallback
+    val fill = tint ?: when {
+        !allowed -> if (kind == GlassKind.Card) colors.surface1 else colors.glassTintFallback
+        kind == GlassKind.Card -> colors.glassCard
+        else -> colors.glassTint
+    }
     val dark = colors.isDark
     return this
         .drawBackdrop(
@@ -151,10 +245,10 @@ fun Modifier.liquidGlass(
                     if (dark) colorControls(brightness = -0.04f, saturation = 1.05f)
                     else colorControls(brightness = 0.06f, saturation = 1.05f)
                     blur(blurDp.dp.toPx())
-                    lens(lensHeight.dp.toPx(), lensAmount.dp.toPx(), depthEffect = true)
+                    lens(lensHeight.dp.toPx(), lensAmount.dp.toPx(), depthEffect = kind == GlassKind.Control)
                 }
             },
-            highlight = { Highlight(width = 1.dp, alpha = if (dark) 0.8f else 1f) },
+            highlight = { Highlight(width = if (kind == GlassKind.Control) 1.5.dp else 1.dp, alpha = 1f) },
             shadow = {
                 if (dark) Shadow(radius = 20.dp, offset = DpOffset(0.dp, 6.dp), color = Color.Black.copy(alpha = 0.5f))
                 else Shadow(radius = 18.dp, offset = DpOffset(0.dp, 6.dp), color = colors.shadow)

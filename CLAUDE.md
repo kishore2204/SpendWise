@@ -61,7 +61,7 @@ This file holds the **non-negotiable rules**. Detailed knowledge lives in `docs/
 ## UI
 
 - Visual identity: an original take on Liquid Glass + Samsung One UI + premium fintech. Don't copy Apple layouts, icons or assets.
-- Glass per ADR-009: `Modifier.liquidGlass()` ONLY on floating controls (tab bar, +, top bar) — they refract real content. Content uses solid `surfaceCard()`. Neutral background, no colour pools, no `vibrancy()`. One accent (primary action + selection); income/expense hues only on money; monochrome icon badges. Never hand-roll blur.
+- Glass per ADR-009 + ADR-010: a cached monochrome guilloché pattern sits behind everything so glass visibly refracts. `liquidGlass(kind = Control)` for floating controls, `liquidGlass(kind = Card)` for content cards. Neutral palette: one accent (primary action + selection), income/expense hues only on money, monochrome icon badges, no colour pools, no `vibrancy()`. Never hand-roll blur; never draw the pattern per frame.
 - Dark AMOLED by default, plus Light and System. The light theme is designed separately, not inverted.
 - Navigation: Home · Accounts · Insights · More, plus a primary "+ Expense" action.
 

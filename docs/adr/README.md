@@ -12,7 +12,8 @@ Each major decision is made through `/council` and recorded here. A superseded A
 | [006](ADR-006-parser-design.md) | Hybrid per-bank templates + helpers; rule-table confidence; Couldn't-read list; fixture/fuzz tests | Accepted |
 | [007](ADR-007-design-system.md) | "Light-glass": live blur only where content scrolls beneath; tokens, type, calm motion | Partly superseded by 008 (glass) |
 | [008](ADR-008-liquid-glass.md) | iOS-style liquid glass: Kyant backdrop, aurora, two backdrops, liquid tab bar with droplet | Revised by 009 |
-| [009](ADR-009-calm-glass-and-palette.md) | Calm glass: neutral background, glass only on floating controls, solid cards, minimal 3-hue palette | Accepted |
+| [009](ADR-009-calm-glass-and-palette.md) | Calm glass: neutral background, minimal 3-hue palette (solid cards revised by 010) | Accepted |
+| [010](ADR-010-guilloche-pattern.md) | Monochrome guilloché pattern behind glass; cards glass again; pattern cached as bitmap | Accepted (user decision) |
 
 ## Planned councils
 - Final product & engineering review (Phase 10)

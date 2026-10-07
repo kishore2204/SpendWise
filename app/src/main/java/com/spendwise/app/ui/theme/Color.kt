@@ -15,6 +15,10 @@ data class SpendWiseColors(
     val background: Color,
     /** A single neutral soft light at the top of the screen — depth without hue. */
     val backgroundLight: Color,
+    /** Monochrome guilloché line field behind everything — what the glass visibly refracts (ADR-010). */
+    val pattern: Color,
+    /** Fill for content cards made of glass (more than controls, so text stays ≥ 4.5:1). */
+    val glassCard: Color,
     /** Solid content cards and grouped lists. */
     val surface1: Color,
     /** Raised elements inside cards (segmented thumb, inputs). */
@@ -57,10 +61,12 @@ val DarkColors = SpendWiseColors(
     isDark = true,
     background = Color(0xFF050507),
     backgroundLight = Color(0xFF17171B),
+    pattern = Color(0x17FFFFFF),
+    glassCard = Color(0x80121216),
     surface1 = Color(0xFF141417),
     surface2 = Color(0xFF2A2A30),
     surface3 = Color(0xFF1C1C20),
-    glassTint = Color(0x8C17171B),
+    glassTint = Color(0x5917171B),
     glassTintFallback = Color(0xF214141A),
     glassHighlightTop = Color(0x33FFFFFF),
     glassHighlightBottom = Color(0x0AFFFFFF),
@@ -88,10 +94,12 @@ val LightColors = SpendWiseColors(
     isDark = false,
     background = Color(0xFFEDEDF0),
     backgroundLight = Color(0xFFF7F7F9),
+    pattern = Color(0x17111117),
+    glassCard = Color(0x8CFFFFFF),
     surface1 = Color(0xFFFFFFFF),
     surface2 = Color(0xFFFFFFFF),
     surface3 = Color(0xFFE6E6EA),
-    glassTint = Color(0x99FAFAFC),
+    glassTint = Color(0x73FAFAFC),
     glassTintFallback = Color(0xF7FAFAFC),
     glassHighlightTop = Color(0xFFFFFFFF),
     glassHighlightBottom = Color(0x66FFFFFF),
@@ -124,6 +132,8 @@ fun lerp(from: SpendWiseColors, to: SpendWiseColors, fraction: Float): SpendWise
         isDark = if (fraction < 0.5f) from.isDark else to.isDark,
         background = c(from.background, to.background),
         backgroundLight = c(from.backgroundLight, to.backgroundLight),
+        pattern = c(from.pattern, to.pattern),
+        glassCard = c(from.glassCard, to.glassCard),
         surface1 = c(from.surface1, to.surface1),
         surface2 = c(from.surface2, to.surface2),
         surface3 = c(from.surface3, to.surface3),

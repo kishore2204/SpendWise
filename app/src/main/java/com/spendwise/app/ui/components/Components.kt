@@ -38,7 +38,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import com.spendwise.app.core.money.Money
-import com.spendwise.app.ui.glass.surfaceCard
+import com.spendwise.app.ui.glass.GlassKind
+import com.spendwise.app.ui.glass.liquidGlass
 import com.kyant.shapes.RoundedRectangle
 import com.spendwise.app.ui.theme.Radius
 import com.spendwise.app.ui.theme.SpendWise
@@ -54,7 +55,8 @@ fun GroupCard(
         modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.screen)
-            .surfaceCard(RoundedRectangle(Radius.group)),
+            .liquidGlass(RoundedRectangle(Radius.group), GlassKind.Card)
+            .clip(RoundedRectangle(Radius.group)),
         content = content,
     )
 }
@@ -127,7 +129,7 @@ fun EmptyState(
         modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.screen)
-            .surfaceCard()
+            .liquidGlass(RoundedRectangle(Radius.card), GlassKind.Card)
             .padding(horizontal = Spacing.lg, vertical = Spacing.xl),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
