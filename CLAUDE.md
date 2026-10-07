@@ -1,0 +1,70 @@
+# SpendWise
+
+Local-first personal expense tracker for one user on one Samsung phone.
+This file holds the **non-negotiable rules**. Detailed knowledge lives in `docs/`; the reasons behind major decisions live in `docs/adr/`.
+
+## Target
+
+- Device: Samsung, **Android 16 / One UI 8.5**. Sideloaded APK only — never published to Google Play.
+- Stack: Kotlin, Coroutines/Flow/StateFlow, Jetpack Compose + Material 3, Room, WorkManager (deferred work only), Vico charts.
+- Single Gradle `app` module, organized by package. No multi-module split in V1.
+- Build JDK: Android Studio's bundled JBR (`C:\Program Files\Android\Android Studio\jbr`). The system `java` on PATH is JDK 22 — do not use it for Gradle.
+
+## Account isolation (rule #1)
+
+- Every financial query is scoped to a single `accountId`. Data for different accounts is never summed or mixed.
+- No combined balance, income, expense, category, trend, chart, budget or insight. No "All Accounts" mode.
+- The selected account is the single source of `accountId` for Home, Transactions, Insights, Budgets, Recurring and Search.
+- Banks are data, never hardcoded. Accounts are identified by `(bank, accountIdentifier)`.
+- A transaction from an unknown account is **never** auto-created: ask the user "Add account" or "Not mine". Remember "Not mine".
+- Category *definitions* are global labels; everything with money in it is per-account. Categories are archived, never hard-deleted. Merchant rules use `accountId = 0` as the global sentinel, never NULL. See ADR-001.
+
+## Money
+
+- Store amounts as `Long` **paise**. Never use `Float`/`Double` for money — not in entities, math, or parsing.
+- Currency is INR. Format only at the UI edge.
+- Timestamps are epoch millis; bank dates are parsed as `Asia/Kolkata`.
+
+## Transaction integrity
+
+- Lifecycle: `PENDING → CONFIRMED` or `PENDING → IGNORED`. **Pending and ignored transactions never affect a balance, total or analytics.**
+- Confirmed expense decreases the balance; confirmed income increases it.
+- A transfer is one record with two linked sides (debit in the source account, credit in the destination). It is **never** income or expense.
+- An ATM withdrawal into the Cash account is a transfer (bank → Cash).
+- A refund links to its original transaction; analytics show the net effect.
+- The sum of a split's parts equals the parent amount, exactly, in paise.
+- Displayed balance = calculated balance + sum of balance adjustments. A manual balance edit creates an adjustment record; it never edits or deletes transactions.
+- Duplicates are rejected. The same transaction can arrive via SMS, notification, historical import and pull-to-refresh, and must still produce exactly one record.
+- Uncertain parses (anything below high confidence) go to review. They are never auto-confirmed.
+
+## SMS
+
+- New messages are handled event-driven (`SMS_RECEIVED` broadcast). Never scan the inbox continuously or on a timer.
+- Inbox reads happen only (a) once during the historical import the user starts, and (b) on pull-to-refresh.
+- Pull-to-refresh processes relevant SMS newer than the last-processed watermark. The unread flag is only a hint, because Samsung Messages marks messages read when they're opened.
+- Parsing must never crash the app. A malformed or unknown SMS becomes "unparsed", not an exception.
+- Parsers are modular: a generic parser plus one parser per bank under `transaction/bankparsers/<bank>/`. Add a bank with `/add-bank-parser`.
+
+## Privacy
+
+- Financial data stays on the device. No backend, no analytics SDKs, no crash reporters that upload data.
+- `android:allowBackup="false"` **plus** `dataExtractionRules` excluding everything (incl. device-transfer). Backups are user-initiated files encrypted with a user passphrase — never Keystore-dependent. See ADR-002.
+- The daily-use build is release (`debuggable=false`); debug uses the `.debug` applicationId and test data only.
+- Never log SMS bodies, amounts or account numbers. No amounts in lock-screen notifications.
+- Never send SMS text, amounts, merchants or account numbers to any external service, including external AI council members.
+- Test fixtures use anonymized SMS (fake account digits, fake person names).
+
+## UI
+
+- Visual identity: an original take on Liquid Glass + Samsung One UI + premium fintech. Don't copy Apple layouts, icons or assets.
+- Roughly 70% clean surfaces, 20% glass, 10% glow/motion. Readability beats effect.
+- Dark AMOLED by default, plus Light and System. The light theme is designed separately, not inverted.
+- Navigation: Home · Accounts · Insights · More, plus a primary "+ Expense" action.
+
+## How we work
+
+- Build in phases (see `docs/development/phases.md`). Commit at the end of each phase: `feat: <phase summary>`.
+- For major decisions, run `/council <decision>` and record the result as an ADR in `docs/adr/`. Don't use it for small choices.
+- Before finishing any change that touches queries, repositories, ViewModels, analytics or balances, run the `account-isolation-auditor` and `transaction-integrity-auditor` agents on the diff.
+- Every parser, balance and analytics calculation has unit tests. Run `./gradlew testDebugUnitTest` before committing.
+- Deploy to the phone with `/deploy-to-phone`.

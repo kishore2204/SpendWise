@@ -1,0 +1,28 @@
+# Gradle / Android
+.gradle/
+build/
+/app/build/
+local.properties
+*.apk
+*.aab
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Signing secrets — never commit
+keystore.properties
+*.jks
+*.keystore
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Never commit real (non-anonymized) SMS or exported user data
+docs/sms/raw/
+*.spendwise-backup
+exports/
