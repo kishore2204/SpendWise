@@ -20,8 +20,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // ADR-002: keep financial data out of screenshots and the recents thumbnail.
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        // ADR-002: keep financial data out of screenshots and the recents thumbnail. Debug builds hold only
+        // test data (separate .debug app), so they stay capturable for UI verification over adb.
+        if (!BuildConfig.DEBUG) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
         setContent {
             val appViewModel: AppViewModel = hiltViewModel()

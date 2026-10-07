@@ -106,7 +106,11 @@ fun MoreScreen(viewModel: MoreViewModel = hiltViewModel()) {
                 HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
                 ListRow(
                     title = "Hidden from screenshots",
-                    subtitle = "Screens are blocked from screenshots and the recent-apps preview.",
+                    subtitle = if (BuildConfig.DEBUG) {
+                        "Blocked in the release build. This test build allows screenshots."
+                    } else {
+                        "Screens are blocked from screenshots and the recent-apps preview."
+                    },
                     leadingIcon = Icons.Rounded.ScreenLockPortrait,
                     leadingTint = colors.pending,
                 )
