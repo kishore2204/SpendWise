@@ -36,7 +36,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.spendwise.app.ui.glass.GlassTopBarState
+import com.spendwise.app.ui.glass.LocalBlurAllowed
+import com.spendwise.app.ui.glass.LocalContentBackdrop
 import com.spendwise.app.ui.glass.LocalGlassTopBar
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
 import com.spendwise.app.ui.theme.SpendWise
 import com.spendwise.app.ui.theme.Spacing
 
@@ -58,6 +68,9 @@ fun LargeTitleScreen(
 ) {
     val listState = rememberLazyListState()
     val collapsed by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
+    val scrolled by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
+    }
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -65,13 +78,19 @@ fun LargeTitleScreen(
     val topBar = LocalGlassTopBar.current
     if (topBar != null) {
         val owner = remember { Any() }
-        LaunchedEffect(topBar, collapsed, collapsedTitle) {
+        LaunchedEffect(topBar, collapsed, scrolled, collapsedTitle) {
             topBar.owner = owner
             topBar.title = collapsedTitle
-            topBar.visible = collapsed
+            topBar.scrolled = scrolled
+            topBar.titleVisible = collapsed
         }
         DisposableEffect(topBar) {
-            onDispose { if (topBar.owner === owner) topBar.visible = false }
+            onDispose {
+                if (topBar.owner === owner) {
+                    topBar.scrolled = false
+                    topBar.titleVisible = false
+                }
+            }
         }
     }
 
@@ -90,33 +109,57 @@ fun LargeTitleScreen(
     }
 }
 
-/** Scroll-edge effect: content dissolves under a soft fade instead of hitting a hard bar. */
+/**
+ * Glass scroll edge (ADR-009): the content under the status bar is refracted through a light blur that fades
+ * out downward, so text dissolves into the edge instead of hitting a hard bar. The inline title appears once
+ * the large title has scrolled away.
+ */
 @Composable
 fun GlassTopBar(state: GlassTopBarState, modifier: Modifier = Modifier) {
     val colors = SpendWise.colors
-    AnimatedVisibility(visible = state.visible, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
+    val backdrop = LocalContentBackdrop.current
+    val allowed = LocalBlurAllowed.current
+    AnimatedVisibility(visible = state.scrolled, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        0f to colors.background.copy(alpha = 0.96f),
-                        0.6f to colors.background.copy(alpha = 0.75f),
-                        1f to colors.background.copy(alpha = 0f),
-                    ),
+                // Offscreen layer + DstIn gradient = a mask that fades the whole glass edge out downward.
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    drawRect(
+                        Brush.verticalGradient(0f to Color.Black, 0.55f to Color.Black, 1f to Color.Transparent),
+                        blendMode = BlendMode.DstIn,
+                    )
+                }
+                .then(
+                    if (backdrop != null) {
+                        Modifier.drawBackdrop(
+                            backdrop = backdrop,
+                            shape = { RectangleShape },
+                            effects = { if (allowed) blur(10.dp.toPx()) },
+                            highlight = null,
+                            shadow = null,
+                            onDrawSurface = { drawRect(colors.background.copy(alpha = if (allowed) 0.55f else 0.92f)) },
+                        )
+                    } else {
+                        Modifier.background(colors.background.copy(alpha = 0.92f))
+                    },
                 )
                 .statusBarsPadding()
-                .height(64.dp),
+                .height(72.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
-            Text(
-                state.title.orEmpty(),
-                style = MaterialTheme.typography.titleMedium,
-                color = colors.text1,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 12.dp, start = Spacing.screen, end = Spacing.screen),
-            )
+            AnimatedVisibility(visible = state.titleVisible, enter = fadeIn(), exit = fadeOut()) {
+                Text(
+                    state.title.orEmpty(),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.text1,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 12.dp, start = Spacing.screen, end = Spacing.screen),
+                )
+            }
         }
     }
 }

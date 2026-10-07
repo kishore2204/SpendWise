@@ -14,7 +14,7 @@ fun AccountsScreen() {
             EmptyState(
                 icon = Icons.Rounded.AccountBalanceWallet,
                 title = "No accounts yet",
-                body = "Adding Indian Bank, HDFC and a Cash wallet arrives in the next build (Phase 3).",
+                body = "Account setup is coming in the next update.",
             )
         }
     }

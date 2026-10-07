@@ -81,7 +81,13 @@ fun MoreScreen(viewModel: MoreViewModel = hiltViewModel()) {
                     Switch(
                         checked = reduceTransparency,
                         onCheckedChange = viewModel::setReduceTransparency,
-                        colors = SwitchDefaults.colors(checkedTrackColor = colors.primary, checkedThumbColor = colors.onPrimary),
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = colors.primary,
+                            checkedThumbColor = colors.onPrimary,
+                            uncheckedTrackColor = colors.surface3,
+                            uncheckedBorderColor = colors.surface3,
+                            uncheckedThumbColor = colors.text2,
+                        ),
                     )
                 }
             }
@@ -94,14 +100,12 @@ fun MoreScreen(viewModel: MoreViewModel = hiltViewModel()) {
                     title = "No internet access",
                     subtitle = "SpendWise has no internet permission. Your data cannot leave this phone.",
                     leadingIcon = Icons.Rounded.CloudOff,
-                    leadingTint = colors.income,
                 )
                 HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
                 ListRow(
                     title = "Excluded from Android backup",
-                    subtitle = "Not copied by Google backup or Smart Switch. Encrypted backups arrive in Phase 7.",
+                    subtitle = "Not copied by Google backup or Smart Switch. Encrypted backups are coming in a later update.",
                     leadingIcon = Icons.Rounded.BackupTable,
-                    leadingTint = colors.transfer,
                 )
                 HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
                 ListRow(
@@ -112,7 +116,6 @@ fun MoreScreen(viewModel: MoreViewModel = hiltViewModel()) {
                         "Screens are blocked from screenshots and the recent-apps preview."
                     },
                     leadingIcon = Icons.Rounded.ScreenLockPortrait,
-                    leadingTint = colors.pending,
                 )
             }
         }

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -49,7 +50,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -59,7 +62,6 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
-import com.spendwise.app.ui.glass.GlassKind
 import com.spendwise.app.ui.glass.LocalBlurAllowed
 import com.spendwise.app.ui.glass.LocalContentBackdrop
 import com.spendwise.app.ui.glass.liquidGlass
@@ -138,7 +140,7 @@ private fun <K> LiquidTabs(
         Row(
             Modifier
                 .fillMaxSize()
-                .liquidGlass(Capsule(), GlassKind.Control)
+                .liquidGlass(Capsule())
                 .pointerInput(count, tabWidthPx) {
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
@@ -175,7 +177,7 @@ private fun <K> LiquidTabs(
                 TabContent(
                     item = item,
                     selected = index == selectedIndex,
-                    tint = colors.text1.copy(alpha = 0.78f),
+                    tint = colors.text2,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
@@ -200,14 +202,17 @@ private fun <K> LiquidTabs(
                 .clearAndSetSemantics {}
                 .alpha(0f)
                 .layerBackdrop(accentLayer)
-                // Same glass as the visible capsule, so the droplet's interior matches the bar it sits in.
-                .liquidGlass(Capsule(), GlassKind.Control)
+                // Flat copy of the bar's fill: the droplet already refracts the real backdrop, so refracting
+                // here too would bend the bar twice (and cost a full glass pass every frame).
+                .background(colors.glassTint, Capsule())
+                // The droplet's resting fill lives UNDER the accent icons, so the selected tab stays vivid.
+                .background(colors.droplet, Capsule())
                 .padding(4.dp)
                 .graphicsLayer(colorFilter = ColorFilter.tint(colors.primary)),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             items.forEachIndexed { index, item ->
-                TabContent(item, selected = true, tint = Color.White, modifier = Modifier.weight(1f).fillMaxHeight())
+                TabContent(item, selected = true, tint = Color.White, modifier = Modifier.weight(1f).fillMaxHeight(), emphasized = true)
             }
         }
 
@@ -225,10 +230,11 @@ private fun <K> LiquidTabs(
                     shape = { Capsule() },
                     effects = {
                         val p = press.value
-                        if (refraction) lens(10.dp.toPx() * p, 14.dp.toPx() * p, chromaticAberration = true)
+                        // Resting: a gentle lens so the droplet reads as glass. Pressed: deeper, with colour fringing.
+                        if (refraction) lens((8f + 6f * p).dp.toPx(), (12f + 8f * p).dp.toPx(), chromaticAberration = p > 0.05f)
                     },
-                    highlight = { Highlight.Default.copy(alpha = 0.25f + 0.75f * press.value) },
-                    shadow = { Shadow(alpha = press.value) },
+                    highlight = { Highlight(width = 1.dp, alpha = 0.5f + 0.5f * press.value) },
+                    shadow = { Shadow(radius = 10.dp, alpha = if (colors.isDark) press.value else 0.5f + 0.5f * press.value) },
                     innerShadow = { InnerShadow(radius = 8.dp * press.value, alpha = press.value) },
                     layerBlock = {
                         val p = press.value
@@ -238,8 +244,8 @@ private fun <K> LiquidTabs(
                         scaleY = swell * (1f - (abs(v) * 0.12f).coerceAtMost(0.12f))
                     },
                     onDrawSurface = {
-                        val p = press.value
-                        drawRect((if (colors.isDark) Color.White else Color.Black).copy(alpha = 0.10f * (1f - p)))
+                        // Pressed: a faint shade so the swollen lens reads as thicker glass.
+                        drawRect(Color.Black.copy(alpha = 0.04f * press.value))
                     },
                 ),
         )
@@ -247,14 +253,22 @@ private fun <K> LiquidTabs(
 }
 
 @Composable
-private fun <K> TabContent(item: BottomBarItem<K>, selected: Boolean, tint: Color, modifier: Modifier) {
+private fun <K> TabContent(item: BottomBarItem<K>, selected: Boolean, tint: Color, modifier: Modifier, emphasized: Boolean = false) {
     Column(
         modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Icon(if (selected) item.selectedIcon else item.icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-        Text(item.label, style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 1)
+        Text(
+            item.label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 12.sp,
+                fontWeight = if (emphasized) FontWeight.SemiBold else FontWeight.Medium,
+            ),
+            color = tint,
+            maxLines = 1,
+        )
     }
 }
 
@@ -271,11 +285,19 @@ private fun LiquidPrimaryButton(label: String, onClick: () -> Unit) {
     Box(
         Modifier
             .size(64.dp)
-            .graphicsLayer {
-                scaleX = scale.value
-                scaleY = scale.value
-            }
-            .liquidGlass(Capsule(), GlassKind.Control, tint = colors.primary.copy(alpha = 0.72f), lensHeight = 14.dp, lensAmount = 28.dp, blurRadius = 2.dp)
+            // Solid accent with glass edges (rim, lens at the border, shadow). Scale lives in the glass layer,
+            // so pressing grows the glass instead of distorting what it samples.
+            .liquidGlass(
+                Capsule(),
+                tint = colors.primary.copy(alpha = 0.92f),
+                lensHeight = 14f,
+                lensAmount = 24f,
+                blurDp = 2f,
+                layerBlock = {
+                    scaleX = scale.value
+                    scaleY = scale.value
+                },
+            )
             .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
                 haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                 onClick()

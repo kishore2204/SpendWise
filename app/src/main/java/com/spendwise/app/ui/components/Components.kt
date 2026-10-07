@@ -25,24 +25,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import com.spendwise.app.core.money.Money
-import com.spendwise.app.ui.glass.liquidGlass
+import com.spendwise.app.ui.glass.surfaceCard
 import com.kyant.shapes.RoundedRectangle
 import com.spendwise.app.ui.theme.Radius
 import com.spendwise.app.ui.theme.SpendWise
 import com.spendwise.app.ui.theme.Spacing
 
-/** Grouped container: card-kind liquid glass (more tint, so dense text stays crisp), continuous 20dp corners. */
+/** Grouped container: solid surface with a glass edge (ADR-009), continuous 20dp corners. Never glass-in-glass. */
 @Composable
 fun GroupCard(
     modifier: Modifier = Modifier,
@@ -52,8 +54,7 @@ fun GroupCard(
         modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.screen)
-            .liquidGlass(RoundedRectangle(Radius.group))
-            .clip(RoundedRectangle(Radius.group)),
+            .surfaceCard(RoundedRectangle(Radius.group)),
         content = content,
     )
 }
@@ -74,7 +75,7 @@ fun ListRow(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     leadingIcon: ImageVector? = null,
-    leadingTint: Color = SpendWise.colors.primary,
+    leadingTint: Color = SpendWise.colors.text2,
     onClick: (() -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
@@ -100,11 +101,14 @@ fun ListRow(
     }
 }
 
-/** 40dp rounded container: hue at 16% with the glyph at full strength (ADR-007 iconography). */
+/**
+ * 40dp monochrome badge (ADR-009): neutral fill, glyph in [tint] (text2 by default). Colour is reserved for
+ * meaning — the accent, income and expense — never decoration.
+ */
 @Composable
-fun IconBadge(icon: ImageVector, tint: Color, modifier: Modifier = Modifier) {
+fun IconBadge(icon: ImageVector, tint: Color = SpendWise.colors.text2, modifier: Modifier = Modifier) {
     Box(
-        modifier.size(40.dp).clip(RoundedCornerShape(Radius.sm)).background(tint.copy(alpha = 0.16f)),
+        modifier.size(40.dp).clip(RoundedRectangle(Radius.sm)).background(SpendWise.colors.badge),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
@@ -123,11 +127,11 @@ fun EmptyState(
         modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.screen)
-            .liquidGlass()
+            .surfaceCard()
             .padding(horizontal = Spacing.lg, vertical = Spacing.xl),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        IconBadge(icon, SpendWise.colors.primary)
+        IconBadge(icon)
         Spacer(Modifier.height(Spacing.md))
         Text(title, style = MaterialTheme.typography.titleMedium, color = SpendWise.colors.text1, textAlign = TextAlign.Center)
         Spacer(Modifier.height(Spacing.xs))
@@ -148,11 +152,12 @@ fun <T> SegmentedChoice(
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val colors = SpendWise.colors
     Row(
         modifier
             .fillMaxWidth()
             .clip(CircleShape)
-            .background(SpendWise.colors.surface2)
+            .background(colors.surface3)
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -161,16 +166,25 @@ fun <T> SegmentedChoice(
             Box(
                 Modifier
                     .weight(1f)
+                    .then(
+                        if (isSelected) {
+                            Modifier.shadow(3.dp, CircleShape, ambientColor = colors.shadow, spotColor = colors.shadow)
+                        } else {
+                            Modifier
+                        },
+                    )
                     .clip(CircleShape)
-                    .background(if (isSelected) SpendWise.colors.primaryContainer else Color.Transparent)
+                    .background(if (isSelected) colors.surface2 else Color.Transparent)
                     .selectable(selected = isSelected, role = Role.RadioButton, onClick = { onSelect(option) })
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     label(option),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (isSelected) SpendWise.colors.onPrimaryContainer else SpendWise.colors.text2,
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                    ),
+                    color = if (isSelected) colors.text1 else colors.text2,
                 )
             }
         }
@@ -178,7 +192,7 @@ fun <T> SegmentedChoice(
 }
 
 /**
- * Money with ₹ and paise de-emphasised (ADR-007): "₹28,450.75" renders ₹ at 60% and ".75" at 55% in text 2.
+ * Money with ₹ and paise de-emphasised but legible (ADR-009): ₹ at 70% in the amount's colour, ".75" at 70% in text 2.
  * Always uses tabular figures through the money styles.
  */
 @Composable
@@ -195,11 +209,11 @@ fun MoneyText(
         val rupeeIndex = formatted.indexOf('₹')
         val dotIndex = formatted.indexOf('.')
         append(formatted.substring(0, rupeeIndex))
-        withStyle(SpanStyle(fontSize = 0.6.em, color = secondary)) { append('₹') }
+        withStyle(SpanStyle(fontSize = 0.7.em)) { append('₹') }
         val wholeEnd = if (dotIndex >= 0) dotIndex else formatted.length
         append(formatted.substring(rupeeIndex + 1, wholeEnd))
         if (dotIndex >= 0) {
-            withStyle(SpanStyle(fontSize = 0.55.em, color = secondary)) { append(formatted.substring(dotIndex)) }
+            withStyle(SpanStyle(fontSize = 0.7.em, color = secondary)) { append(formatted.substring(dotIndex)) }
         }
     }
     Text(text, style = style, color = color, modifier = modifier, maxLines = 1)

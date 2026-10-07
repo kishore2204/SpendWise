@@ -29,7 +29,7 @@ fun AddTransactionScreen(onClose: () -> Unit) {
                 EmptyState(
                     icon = Icons.Rounded.EditNote,
                     title = "Manual entry is coming",
-                    body = "Expense, income, transfer and cash entry arrive in Phase 4.",
+                    body = "Expense, income, transfer and cash entry are coming soon.",
                 )
             }
         }
