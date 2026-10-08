@@ -1,12 +1,12 @@
 package com.spendwise.app.security
 
+import android.os.SystemClock
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
-import com.spendwise.app.core.time.Clock
 import com.spendwise.app.data.preferences.UserPreferencesRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +24,40 @@ object AppLockPolicy {
     }
 }
 
+/** Lifecycle state kept separate from Android so timeout and fail-closed transitions are unit-testable. */
+internal class AppLockSession {
+    var locked: Boolean? = null
+        private set
+    private var leftAtElapsed: Long? = null
+    private var lockEnabled: Boolean? = null
+
+    /** Cover an unlocked screen synchronously before Activity/Compose collectors resume. */
+    fun prepareForStart() {
+        if (lockEnabled != false && locked != true) locked = null
+    }
+
+    fun onStart(enabled: Boolean, timeoutMs: Long, nowElapsed: Long) {
+        lockEnabled = enabled
+        if (locked != true) locked = AppLockPolicy.shouldLock(enabled, leftAtElapsed, nowElapsed, timeoutMs)
+    }
+
+    fun onStop(nowElapsed: Long, prompting: Boolean) {
+        if (prompting) return
+        leftAtElapsed = nowElapsed
+        // Leave the old UI covered until the resume decision is complete. An already locked state stays latched.
+        if (lockEnabled != false && locked != true) locked = null
+    }
+
+    fun setLockEnabled(enabled: Boolean) {
+        lockEnabled = enabled
+    }
+
+    fun unlocked() {
+        locked = false
+        leftAtElapsed = null
+    }
+}
+
 /**
  * App lock (ADR-002 rule 9): a UI gate only — it never guards a key the database depends on, so a changed fingerprint
  * can never lock anyone out of their data. Fingerprint / face, or the phone's PIN as a fallback.
@@ -31,42 +65,40 @@ object AppLockPolicy {
 @Singleton
 class AppLock @Inject constructor(
     private val prefs: UserPreferencesRepository,
-    private val clock: Clock,
 ) {
     /** null = not decided yet (content stays hidden until it is). */
     private val _locked = MutableStateFlow<Boolean?>(null)
     val locked: StateFlow<Boolean?> = _locked.asStateFlow()
 
-    private var leftAt: Long? = null
-    private var expectingExternal = false
+    private val session = AppLockSession()
     private var prompting = false
 
-    suspend fun onStart() {
+    /** Must run before super.onStart() so Compose cannot draw the previous unlocked frame. */
+    fun prepareForStart() {
         if (prompting) return
-        if (expectingExternal) {
-            // Back from a file picker / settings screen we opened ourselves: not "leaving the app".
-            expectingExternal = false
-            if (_locked.value == null) _locked.value = prefs.appLockEnabled.first()
-            return
-        }
+        session.prepareForStart()
+        _locked.value = session.locked
+    }
+
+    suspend fun onStart() {
+        if (prompting || session.locked == true) return
         val enabled = prefs.appLockEnabled.first()
         val timeout = prefs.appLockTimeoutSec.first() * 1_000L
-        if (_locked.value != true) _locked.value = AppLockPolicy.shouldLock(enabled, leftAt, clock.now(), timeout)
+        session.onStart(enabled, timeout, SystemClock.elapsedRealtime())
+        _locked.value = session.locked
     }
 
     fun onStop() {
-        if (prompting || expectingExternal) return
-        leftAt = clock.now()
+        session.onStop(SystemClock.elapsedRealtime(), prompting)
+        _locked.value = session.locked
     }
 
-    /** Call right before launching a system screen (file picker, app settings) so returning doesn't lock. */
-    fun expectExternal() {
-        expectingExternal = true
-    }
+    /** Keep the synchronous lifecycle cache in step with the settings screen. */
+    fun setLockEnabled(enabled: Boolean) = session.setLockEnabled(enabled)
 
     fun unlocked() {
+        session.unlocked()
         _locked.value = false
-        leftAt = null
     }
 
     /** Shows the system prompt; [onResult] true when the user proved it's them. */

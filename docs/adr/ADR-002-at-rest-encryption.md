@@ -49,3 +49,11 @@ The Performance seat's SQLCipher setup (raw key, 16KB-ready 4.6.1+) is sound and
 - Cloud sync is ever added.
 
 If so, adopt option 1 as described by the Performance seat: a random 32-byte key, wrapped by a Keystore key **without** a user-authentication requirement, passed to SQLCipher as raw key bytes.
+
+## Implementation follow-up (2026-10-08)
+
+A security review found that a one-shot `expectExternal` exemption could stay set when a user pressed Home from the system file picker. On a later launch it could bypass the configured timeout. It also found that drawing an opaque cover did not remove the underlying Compose screen from accessibility services, and asynchronous preference loading could leave a resume frame uncovered.
+
+The Android lifecycle, Security & Accessibility, Product/UX, Devil's Advocate and Simplicity council seats unanimously recommended removing the picker exemption and treating picker time like any other time outside SpendWise. The selected 0/60/300-second timeout now applies on return; elapsed time uses Android's monotonic `elapsedRealtime` clock. A resume is covered synchronously before the Activity starts drawing, and the covered navigation subtree has its semantics cleared until the decision resolves. Navigation state stays composed behind the cover so unlocking returns the user to the same screen.
+
+This remains a UI gate, not database encryption. A long-running picker can therefore require authentication on return when the selected timeout has elapsed.

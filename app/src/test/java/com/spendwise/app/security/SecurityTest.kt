@@ -68,6 +68,50 @@ class SecurityTest {
         assertThat(AppLockPolicy.shouldLock(true, 1_000, 1_000, 0)).isTrue()
     }
 
+    @Test fun `picker and Home returns use the normal timeout without an external-screen exemption`() {
+        val session = AppLockSession()
+        session.onStart(enabled = true, timeoutMs = 60_000, nowElapsed = 1_000)
+        assertThat(session.locked).isTrue() // cold start is covered
+        session.unlocked()
+
+        session.onStop(nowElapsed = 10_000, prompting = false) // SAF picker starts
+        assertThat(session.locked).isNull() // fail closed until the return decision
+        session.prepareForStart()
+        session.onStart(enabled = true, timeoutMs = 60_000, nowElapsed = 69_999)
+        assertThat(session.locked).isFalse() // picker returned within the configured timeout
+
+        session.onStop(nowElapsed = 70_000, prompting = false) // user presses Home from the picker
+        session.prepareForStart()
+        session.onStart(enabled = true, timeoutMs = 60_000, nowElapsed = 130_000)
+        assertThat(session.locked).isTrue() // later return obeys timeout, never consumes a stale bypass
+        session.onStop(nowElapsed = 131_000, prompting = false)
+        session.prepareForStart()
+        session.onStart(enabled = true, timeoutMs = 60_000, nowElapsed = 132_000)
+        assertThat(session.locked).isTrue() // an unauthenticated locked state remains latched
+    }
+
+    @Test fun `resume is covered before preferences resolve and zero timeout locks on picker return`() {
+        val session = AppLockSession()
+        session.onStart(enabled = true, timeoutMs = 60_000, nowElapsed = 1_000)
+        session.unlocked()
+        session.onStop(nowElapsed = 2_000, prompting = false)
+        session.prepareForStart()
+        assertThat(session.locked).isNull()
+
+        session.onStart(enabled = true, timeoutMs = 0, nowElapsed = 2_001)
+        assertThat(session.locked).isTrue()
+    }
+
+    @Test fun `disabled app lock does not flash the cover on ordinary resume`() {
+        val session = AppLockSession()
+        session.onStart(enabled = false, timeoutMs = 60_000, nowElapsed = 1_000)
+        assertThat(session.locked).isFalse()
+        session.onStop(nowElapsed = 2_000, prompting = false)
+        assertThat(session.locked).isFalse()
+        session.prepareForStart()
+        assertThat(session.locked).isFalse()
+    }
+
     @Test fun `CSV amounts are exact and formula injection is neutralised`() {
         assertThat(CsvExporter.rupees(-45_050)).isEqualTo("-450.50")
         assertThat(CsvExporter.rupees(5)).isEqualTo("0.05")

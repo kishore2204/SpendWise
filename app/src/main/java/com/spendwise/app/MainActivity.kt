@@ -7,10 +7,7 @@ import com.spendwise.app.navigation.AppLinks
 import android.view.WindowManager
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.Modifier
-import com.spendwise.app.feature.settings.LockOverlay
+import com.spendwise.app.feature.settings.LockGate
 import com.spendwise.app.security.AppLock
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -54,10 +51,8 @@ class MainActivity : FragmentActivity() {
 
             SpendWiseTheme(darkTheme = dark) {
                 val locked by appLock.locked.collectAsStateWithLifecycle()
-                Box(Modifier.fillMaxSize()) {
+                LockGate(locked = locked, onUnlock = ::unlock) {
                     SpendWiseNavHost()
-                    // App lock (ADR-002 rule 9): a solid cover until unlocked — and until the lock state is known.
-                    if (locked != false) LockOverlay(locked, onUnlock = ::unlock)
                 }
                 LaunchedEffect(locked) { if (locked == true) unlock() }
             }
@@ -65,13 +60,14 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onStart() {
+        appLock.prepareForStart()
         super.onStart()
         lifecycleScope.launch { appLock.onStart() }
     }
 
     override fun onStop() {
-        super.onStop()
         appLock.onStop()
+        super.onStop()
     }
 
     private fun unlock() {

@@ -57,6 +57,7 @@ This file holds the **non-negotiable rules**. Detailed knowledge lives in `docs/
 - `android:allowBackup="false"` **plus** `dataExtractionRules` excluding everything (incl. device-transfer). Backups are user-initiated files encrypted with a user passphrase — never Keystore-dependent. See ADR-002.
 - The daily-use build is release (`debuggable=false`); debug uses the `.debug` applicationId and test data only.
 - Never log SMS bodies, amounts or account numbers. No amounts in lock-screen notifications.
+- When app-lock state is locked or unresolved, cover financial screens before drawing and remove their accessibility semantics. File pickers follow the normal lock timeout; they never create a bypass.
 - Never send SMS text, amounts, merchants or account numbers to any external service, including external AI council members.
 - Test fixtures use anonymized SMS (fake account digits, fake person names).
 

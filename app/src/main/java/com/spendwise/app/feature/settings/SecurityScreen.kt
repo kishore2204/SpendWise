@@ -44,7 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -109,7 +109,10 @@ class SecurityViewModel @Inject constructor(
     /** Held only between "choose passphrase" and "choose file", then wiped. Never stored. */
     private var pendingPassphrase: CharArray? = null
 
-    fun setLock(enabled: Boolean) = viewModelScope.launch { prefs.setAppLock(enabled) }
+    fun setLock(enabled: Boolean) {
+        appLock.setLockEnabled(enabled)
+        viewModelScope.launch { prefs.setAppLock(enabled) }
+    }
     fun setTimeout(seconds: Int) = viewModelScope.launch { prefs.setAppLockTimeout(seconds) }
 
     fun holdPassphrase(p: CharArray) { pendingPassphrase?.fill('\u0000'); pendingPassphrase = p }
@@ -254,7 +257,6 @@ fun SecurityScreen(onClose: () -> Unit, viewModel: SecurityViewModel = hiltViewM
                         subtitle = "Replaces everything on this phone with the backup",
                         leadingIcon = Icons.Rounded.Restore,
                         onClick = {
-                            viewModel.appLock.expectExternal()
                             openBackup.launch(arrayOf("*/*"))
                         },
                     )
@@ -305,7 +307,6 @@ fun SecurityScreen(onClose: () -> Unit, viewModel: SecurityViewModel = hiltViewM
             onOk = { pass ->
                 askBackupPass = false
                 viewModel.holdPassphrase(pass)
-                viewModel.appLock.expectExternal()
                 createBackup.launch("SpendWise-${viewModel.today()}.swbackup")
             },
         )
@@ -328,7 +329,6 @@ fun SecurityScreen(onClose: () -> Unit, viewModel: SecurityViewModel = hiltViewM
                 TextButton(onClick = {
                     csvWarn = false
                     val a = csvAccount ?: return@TextButton
-                    viewModel.appLock.expectExternal()
                     createCsv.launch("SpendWise-${a.nickname.filter { it.isLetterOrDigit() }}-${viewModel.today()}.csv")
                 }) { Text("Export", color = colors.primary) }
             },
@@ -414,6 +414,22 @@ private fun RestoreConfirmDialog(c: RestoreCandidate, onCancel: () -> Unit, onRe
     )
 }
 
+/** Covers the app while the lock decision is pending or locked; hidden screens have no accessibility actions. */
+@Composable
+fun LockGate(locked: Boolean?, onUnlock: () -> Unit, content: @Composable () -> Unit) {
+    val covered = locked != false
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if (covered) Modifier.clearAndSetSemantics { } else Modifier),
+        ) {
+            content()
+        }
+        if (covered) LockOverlay(locked, onUnlock)
+    }
+}
+
 /** Covers the whole app while locked (and before the lock state is known). Solid — nothing shows through. */
 @Composable
 fun LockOverlay(locked: Boolean?, onUnlock: () -> Unit) {
@@ -426,11 +442,12 @@ fun LockOverlay(locked: Boolean?, onUnlock: () -> Unit) {
             .fillMaxSize()
             .background(colors.background)
             // Swallow every touch: nothing behind the cover can be tapped.
-            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } }
-            .semantics(mergeDescendants = false) { },
+            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } },
         contentAlignment = Alignment.Center,
     ) {
-        if (locked == true) {
+        if (locked == null) {
+            Text("Checking app lock…", style = MaterialTheme.typography.bodyMedium, color = colors.text2, textAlign = TextAlign.Center)
+        } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Spacing.md), modifier = Modifier.padding(Spacing.xl)) {
                 Icon(Icons.Rounded.Lock, contentDescription = null, tint = colors.primary, modifier = Modifier.size(48.dp))
                 Text("SpendWise is locked", style = MaterialTheme.typography.titleLarge, color = colors.text1, textAlign = TextAlign.Center)
