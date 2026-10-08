@@ -37,6 +37,11 @@ class SelectedAccountStore @Inject constructor(
         dataStore.edit { it[KEY] = accountId }
     }
 
+    /** After "Delete all data". */
+    suspend fun clear() {
+        dataStore.edit { it.remove(KEY) }
+    }
+
     private companion object {
         val KEY = longPreferencesKey("selected_account_id")
     }

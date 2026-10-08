@@ -117,6 +117,7 @@ class TransactionDetailViewModel @AssistedInject constructor(
     private val ledger: TransactionLedger,
     private val clock: Clock,
     private val shared: com.spendwise.app.domain.SharedExpenseLedger,
+    private val categoryLedger: com.spendwise.app.domain.CategoryLedger,
 ) : ViewModel() {
     @AssistedFactory
     interface Factory {
@@ -212,6 +213,16 @@ class TransactionDetailViewModel @AssistedInject constructor(
         }
     }, {})
 
+    /** A category typed while reviewing; [onResult] gets its id, or an error message. */
+    fun createCategory(name: String, onResult: (Long?, String?) -> Unit) = viewModelScope.launch {
+        val r = state.value.row
+        val kind = if ((r?.amountPaise ?: 0) > 0) CategoryKind.INCOME else CategoryKind.EXPENSE
+        when (val res = categoryLedger.createCategory(name, kind, r?.accountId)) {
+            is LedgerResult.Ok -> onResult(res.id, null)
+            is LedgerResult.Rejected -> onResult(null, res.reason)
+        }
+    }
+
     fun removeShare(shareId: Long) = run({ shared.removeShare(shareId) }, {})
     fun forgive(shareId: Long) = run({ shared.forgive(shareId) }, {})
     fun markRepayment(friendId: Long) = run({ shared.markAsRepayment(txnId, friendId) }, {})
@@ -274,11 +285,7 @@ fun TransactionDetailScreen(
                     MoneyText(
                         row.amountPaise,
                         style = SpendWise.money.hero,
-                        color = when {
-                            isTransfer -> colors.transfer
-                            row.amountPaise > 0 -> colors.income
-                            else -> colors.text1
-                        },
+                        color = if (row.amountPaise > 0) colors.income else colors.expense,
                         sign = Money.SignStyle.Always,
                     )
                     Spacer(Modifier.height(Spacing.xs))
@@ -297,6 +304,7 @@ fun TransactionDetailScreen(
                         nearAnchor = state.nearAnchor,
                         onConfirm = viewModel::confirm,
                         onIgnore = { viewModel.ignore(onClose) },
+                        onCreateCategory = viewModel::createCategory,
                     )
                 }
             }
@@ -459,6 +467,7 @@ private fun ReviewPanel(
     nearAnchor: Boolean,
     onConfirm: (Long?) -> Unit,
     onIgnore: () -> Unit,
+    onCreateCategory: (String, (Long?, String?) -> Unit) -> Unit,
 ) {
     val colors = SpendWise.colors
     var chosen by remember(row.id) { mutableStateOf(row.categoryId) }
@@ -484,12 +493,11 @@ private fun ReviewPanel(
         }
         if (categorisable && categories.isNotEmpty()) {
             Spacer(Modifier.height(Spacing.sm))
-            ChipRow(
-                options = categories,
-                selected = categories.firstOrNull { it.id == chosen },
-                label = { it.name },
-                icon = { CategoryIcons.of(it.iconKey) },
-                onSelect = { chosen = it.id },
+            com.spendwise.app.ui.components.CategoryPicker(
+                categories = categories,
+                selectedId = chosen,
+                onSelect = { chosen = it },
+                onCreate = { name, done -> onCreateCategory(name) { id, error -> if (id != null) chosen = id; done(error) } },
             )
         }
         Spacer(Modifier.height(Spacing.md))

@@ -50,14 +50,17 @@ object SenderGate {
  * the [IngestProcessor] drains RECEIVED rows. Staging never parses, so a parser bug can't lose a message.
  */
 @Singleton
-class MessageStager @Inject constructor(private val dao: RawMessageDao) {
+class MessageStager @Inject constructor(private val dao: RawMessageDao, private val gate: IngestGate) {
 
     /** Returns how many messages were NEW (not seen before on any path). */
     suspend fun stage(messages: List<RawSms>, source: MessageSource, receivedAt: Long): Int =
         stage(messages.map { IncomingSms(it, receivedAt) }, source)
 
     @JvmName("stageIncoming")
-    suspend fun stage(messages: List<IncomingSms>, source: MessageSource): Int {
+    suspend fun stage(messages: List<IncomingSms>, source: MessageSource): Int = gate.withLock { stageLocked(messages, source) }
+
+    /** For callers already holding [IngestGate]. */
+    suspend fun stageLocked(messages: List<IncomingSms>, source: MessageSource): Int {
         var inserted = 0
         for ((sms, receivedAt) in messages) {
             if (!SenderGate.allows(sms.sender) || sms.body.isBlank()) continue

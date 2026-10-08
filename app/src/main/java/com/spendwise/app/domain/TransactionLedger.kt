@@ -58,6 +58,7 @@ class TransactionLedger @Inject constructor(
     suspend fun addEntry(input: EntryInput): LedgerResult {
         if (input.kind !in ENTRY_KINDS) return LedgerResult.Rejected("Use a transfer for money between your accounts")
         if (input.amountPaise <= 0) return LedgerResult.Rejected("Enter an amount above zero")
+        categoryProblem(input.categoryId, input.kind)?.let { return LedgerResult.Rejected(it) }
         val now = clock.now()
         val signed = signedFor(input.kind, input.amountPaise)
         val key = Merchants.key(input.merchant)
@@ -99,6 +100,7 @@ class TransactionLedger @Inject constructor(
             val t = txnDao.getById(txnId) ?: return@withTransaction LedgerResult.Rejected("Transaction not found")
             if (t.kind.isTransferFamily) return@withTransaction LedgerResult.Rejected("Edit transfers from the transfer itself")
             if (t.kind == TxnKind.REPAYMENT) return@withTransaction LedgerResult.Rejected("Undo the repayment first, then edit it")
+            if (t.refundOfId == null) categoryProblem(categoryId, t.kind)?.let { return@withTransaction LedgerResult.Rejected(it) }
             val signed = signedFor(t.kind, amountPaise, fallbackNegative = t.amountPaise < 0)
             val isRefund = t.refundOfId != null
             if (isRefund) {
@@ -343,6 +345,7 @@ class TransactionLedger @Inject constructor(
         // Bank ↔ Cash is a transfer with two legs; without a wallet it would be money that vanishes from analytics.
         if (cashMove && cash == null) return LedgerResult.Rejected("Add a Cash wallet first, so the cash has somewhere to go")
         val now = clock.now()
+        if (categoryId != null) categoryProblem(categoryId, t.kind)?.let { return LedgerResult.Rejected(it) }
         val recategorise = categoryId != null && t.kind in SPLITTABLE && txnDao.getSplits(t.id).isEmpty()
         val category = if (recategorise) categoryId else t.categoryId
         txnDao.update(t.copy(status = TxnStatus.CONFIRMED, categoryId = category, updatedAt = now))
@@ -437,9 +440,27 @@ class TransactionLedger @Inject constructor(
     // ---------------------------------------------------------------- categories
 
     /** Account rule → global rule → shipped dictionary (ADR-001). */
-    suspend fun suggestCategory(accountId: Long, merchant: String?): Long? {
+    suspend fun suggestCategory(accountId: Long, merchant: String?, kind: com.spendwise.app.data.db.entity.CategoryKind? = null): Long? {
         val key = Merchants.key(merchant) ?: return null
-        return db.merchantRuleDao().lookup(accountId, key) ?: MerchantDictionary.categoryFor(key)
+        val id = db.merchantRuleDao().lookup(accountId, key) ?: MerchantDictionary.categoryFor(key) ?: return null
+        // A rule learned on income never lands on spending (and vice versa).
+        return if (kind == null || db.categoryDao().getById(id)?.kind == kind) id else null
+    }
+
+    /** The category must exist, be live, and match the money's direction; null (uncategorised) is always fine. */
+    private suspend fun categoryProblem(categoryId: Long?, kind: TxnKind): String? {
+        if (categoryId == null) return null
+        val c = db.categoryDao().getById(categoryId) ?: return "Category not found"
+        val wanted = when (kind) {
+            TxnKind.EXPENSE, TxnKind.FEE -> com.spendwise.app.data.db.entity.CategoryKind.EXPENSE
+            TxnKind.INCOME, TxnKind.INTEREST -> com.spendwise.app.data.db.entity.CategoryKind.INCOME
+            else -> return null // transfers, refunds, repayments: set by the ledger itself
+        }
+        return when {
+            c.archivedAt != null -> "That category was archived"
+            c.kind != wanted -> if (wanted == com.spendwise.app.data.db.entity.CategoryKind.EXPENSE) "Pick a spending category" else "Pick an income category"
+            else -> null
+        }
     }
 
     /**

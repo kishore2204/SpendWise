@@ -27,8 +27,6 @@ import com.spendwise.app.transaction.parsing.RawSms
 import com.spendwise.app.transaction.parsing.TransactionParser
 import com.spendwise.app.transaction.parsing.UnrecognizedCause
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -64,12 +62,15 @@ class IngestProcessor @Inject constructor(
     private val db: SpendWiseDatabase,
     private val clock: Clock,
     private val ledger: TransactionLedger,
+    private val gate: IngestGate,
 ) {
-    private val mutex = Mutex()
     private val raw get() = db.rawMessageDao()
     private val review get() = db.reviewDao()
 
-    suspend fun drain(): IngestSummary = mutex.withLock {
+    suspend fun drain(): IngestSummary = gate.withLock { drainLocked() }
+
+    /** For callers already holding [IngestGate]. */
+    suspend fun drainLocked(): IngestSummary {
         var total = IngestSummary()
         while (true) {
             val batch = raw.nextReceived(BATCH)
@@ -86,7 +87,7 @@ class IngestProcessor @Inject constructor(
                 }
             }
         }
-        total
+        return total
     }
 
     private suspend fun process(row: RawMessageEntity): IngestSummary {
@@ -283,7 +284,7 @@ class IngestProcessor @Inject constructor(
         kind == TxnKind.INTEREST -> INTEREST_CATEGORY
         kind == TxnKind.EXPENSE || kind == TxnKind.FEE || kind == TxnKind.INCOME -> {
             val wanted = if (kind == TxnKind.INCOME) CategoryKind.INCOME else CategoryKind.EXPENSE
-            ledger.suggestCategory(accountId, merchant)?.takeIf { db.categoryDao().getById(it)?.kind == wanted }
+            ledger.suggestCategory(accountId, merchant, wanted)
         }
         else -> null
     }

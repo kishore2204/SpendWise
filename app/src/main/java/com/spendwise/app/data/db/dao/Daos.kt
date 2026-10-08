@@ -43,6 +43,9 @@ interface AccountDao {
     @Query("UPDATE account SET archivedAt = :at WHERE id = :accountId")
     suspend fun archive(accountId: Long, at: Long)
 
+    @Query("SELECT id FROM account")
+    suspend fun allIds(): List<Long>
+
     /** Accounts are identified by (bank, accountIdentifier) — CLAUDE.md. */
     @Query("SELECT * FROM account WHERE bankCode = :bankCode AND last4 = :last4")
     suspend fun findByIdentifier(bankCode: String, last4: String): AccountEntity?
@@ -188,6 +191,10 @@ interface AccountCategoryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(rows: List<AccountCategoryEntity>)
 
+    /** Shows a category again in ONE account's overlay — never touches other accounts' choices. */
+    @Query("UPDATE account_category SET hidden = 0 WHERE accountId = :accountId AND categoryId = :categoryId")
+    suspend fun unhide(accountId: Long, categoryId: Long)
+
     @Query("SELECT COUNT(*) FROM account_category WHERE accountId = :accountId")
     suspend fun countFor(accountId: Long): Int
 }
@@ -212,6 +219,21 @@ interface CategoryDao {
 
     @Query("SELECT * FROM category ORDER BY sortOrder")
     suspend fun getAll(): List<CategoryEntity>
+
+    @Query("SELECT * FROM category WHERE name = :name COLLATE NOCASE LIMIT 1")
+    suspend fun byName(name: String): CategoryEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(category: CategoryEntity): Long
+
+    @Query("SELECT COUNT(*) FROM category")
+    suspend fun count(): Long
+
+    @Query("SELECT COALESCE(MAX(id), 0) FROM category")
+    suspend fun maxId(): Long
+
+    @Query("UPDATE category SET archivedAt = NULL WHERE id = :id")
+    suspend fun unarchive(id: Long)
 }
 
 @Dao

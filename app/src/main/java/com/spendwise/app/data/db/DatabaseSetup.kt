@@ -144,8 +144,13 @@ object DatabaseSetup {
 
     /** Drops and recreates every trigger on each open, so a changed rule always replaces the installed one. */
     fun createTriggers(db: SupportSQLiteDatabase) {
-        TRIGGER_NAMES.forEach { db.execSQL("DROP TRIGGER IF EXISTS $it") }
+        dropTriggers(db)
         TRIGGERS.forEach(db::execSQL)
+    }
+
+    /** Only for "Delete all data" (the append-only anchor rule would block it); always followed by [createTriggers]. */
+    fun dropTriggers(db: SupportSQLiteDatabase) {
+        TRIGGER_NAMES.forEach { db.execSQL("DROP TRIGGER IF EXISTS $it") }
     }
 
     private data class SeedCategory(val id: Long, val name: String, val kind: String, val icon: String, val color: Int, val system: Boolean = false)

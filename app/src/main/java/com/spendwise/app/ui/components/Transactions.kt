@@ -1,5 +1,6 @@
 package com.spendwise.app.ui.components
 
+import androidx.compose.material.icons.automirrored.rounded.Label
 import androidx.compose.material.icons.rounded.Handshake
 import androidx.compose.material.icons.rounded.Checkroom
 import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
@@ -105,6 +106,7 @@ object CategoryIcons {
         "undo" -> Icons.AutoMirrored.Rounded.Undo
         "tune" -> Icons.Rounded.Tune
         "handshake" -> Icons.Rounded.Handshake
+        "label" -> Icons.AutoMirrored.Rounded.Label
         "checkroom" -> Icons.Rounded.Checkroom
         "directions_walk" -> Icons.AutoMirrored.Rounded.DirectionsWalk
         "devices" -> Icons.Rounded.Devices
@@ -175,11 +177,9 @@ fun TransactionRowView(row: TxnRow, onClick: () -> Unit, modifier: Modifier = Mo
     val colors = SpendWise.colors
     val isTransfer = row.kind.isTransferFamily
     val icon = if (isTransfer) Icons.Rounded.SwapHoriz else CategoryIcons.of(row.categoryIcon)
-    val amountColor = when {
-        isTransfer || row.kind == TxnKind.REPAYMENT -> colors.transfer // neither income nor spending
-        row.amountPaise > 0 -> colors.income
-        else -> colors.text1
-    }
+    // Green = money in, red = money out (user choice): the colour says which way the money moved; the subtitle
+    // says what it counts as (Transfer, Paid back…).
+    val amountColor = if (row.amountPaise > 0) colors.income else colors.expense
     val subtitle = buildList {
         when {
             row.hasSplits -> add("Split")

@@ -121,6 +121,7 @@ class AddTransactionViewModel @AssistedInject constructor(
     repository: AccountRepository,
     private val selected: SelectedAccountStore,
     private val clock: Clock,
+    private val categoryLedger: com.spendwise.app.domain.CategoryLedger,
 ) : ViewModel() {
 
     @AssistedFactory
@@ -189,6 +190,15 @@ class AddTransactionViewModel @AssistedInject constructor(
 
     fun pickCategory(id: Long) = update { copy(categoryId = id, categoryPickedByUser = true) }
 
+    /** "+ New" category typed by the user: created for every account, then picked. */
+    fun createCategory(name: String, onResult: (String?) -> Unit) = viewModelScope.launch {
+        val kind = if (_form.value.mode == EntryMode.Income) CategoryKind.INCOME else CategoryKind.EXPENSE
+        when (val r = categoryLedger.createCategory(name, kind, _form.value.accountId)) {
+            is com.spendwise.app.domain.LedgerResult.Ok -> { pickCategory(r.id); onResult(null) }
+            is com.spendwise.app.domain.LedgerResult.Rejected -> onResult(r.reason)
+        }
+    }
+
     /** Categories are per-account (overlay), so switching account clears the choice and re-suggests. */
     fun selectAccount(id: Long) {
         update { copy(accountId = id, toAccountId = toAccountId.takeIf { it != id }, categoryId = null, categoryPickedByUser = false) }
@@ -203,7 +213,8 @@ class AddTransactionViewModel @AssistedInject constructor(
             delay(250)
             val f = _form.value
             if (f.categoryPickedByUser || f.accountId == null) return@launch
-            val suggestion = ledger.suggestCategory(f.accountId, text)
+            val wanted = if (f.mode == EntryMode.Income) CategoryKind.INCOME else CategoryKind.EXPENSE
+            val suggestion = ledger.suggestCategory(f.accountId, text, wanted)
             // Drop the result if the user changed account or picked a category meanwhile.
             _form.update { if (it.categoryPickedByUser || it.accountId != f.accountId) it else it.copy(categoryId = suggestion) }
         }
@@ -358,13 +369,11 @@ fun AddTransactionScreen(
                 }
                 item(key = "category-label") { SectionLabel("Category") }
                 item(key = "category") {
-                    ChipRow(
-                        options = categories,
-                        selected = categories.firstOrNull { it.id == form.categoryId },
-                        label = { it.name },
-                        icon = { CategoryIcons.of(it.iconKey) },
-                        onSelect = { viewModel.pickCategory(it.id) },
-                        scrollable = false,
+                    com.spendwise.app.ui.components.CategoryPicker(
+                        categories = categories,
+                        selectedId = form.categoryId,
+                        onSelect = viewModel::pickCategory,
+                        onCreate = viewModel::createCategory,
                     )
                 }
                 item(key = "method-label") { SectionLabel("Paid by") }

@@ -35,6 +35,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.SmsFailed
@@ -53,7 +57,16 @@ class MoreViewModel @Inject constructor(
     private val preferences: UserPreferencesRepository,
     private val rawDao: RawMessageDao,
     private val sync: SmsSync,
+    private val wiper: com.spendwise.app.data.DataWiper,
 ) : ViewModel() {
+    val wiped = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+    /** Irreversible: every account, transaction, SMS record, friend, rule and custom category on this phone. */
+    fun wipeEverything() = viewModelScope.launch {
+        // The wipe itself is non-cancellable; a failure is reported, never a crash.
+        wiped.value = runCatching { wiper.wipeEverything() }.isSuccess
+    }
+
     val unreadableCount: StateFlow<Int> = rawDao.observeUnreadableCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
     fun smsOn() = sync.canReceiveSms()
 
@@ -80,6 +93,8 @@ fun MoreScreen(
     val unreadable by viewModel.unreadableCount.collectAsStateWithLifecycle()
     var smsOn by remember { mutableStateOf(viewModel.smsOn()) }
     var confirmPurge by remember { mutableStateOf(false) }
+    var confirmWipe by remember { mutableStateOf(false) }
+    val wiped by viewModel.wiped.collectAsStateWithLifecycle()
     LifecycleResumeEffect(Unit) {
         smsOn = viewModel.smsOn()
         onPauseOrDispose { }
@@ -192,6 +207,19 @@ fun MoreScreen(
             }
         }
 
+        item(key = "danger-label") { SectionLabel("Danger zone") }
+        item(key = "danger") {
+            GroupCard {
+                ListRow(
+                    title = "Delete all data",
+                    subtitle = if (wiped) "Done — SpendWise is empty" else "Every account, transaction and setting about your money. Can't be undone.",
+                    leadingIcon = Icons.Rounded.DeleteForever,
+                    leadingTint = colors.danger,
+                    onClick = { confirmWipe = true },
+                )
+            }
+        }
+
         item(key = "about-label") { SectionLabel("About") }
         item(key = "about") {
             GroupCard {
@@ -202,6 +230,31 @@ fun MoreScreen(
                 )
             }
         }
+    }
+
+    if (confirmWipe) {
+        var typed by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { confirmWipe = false },
+            title = { Text("Delete all data?") },
+            text = {
+                Column {
+                    Text(
+                        "This deletes every account, transaction, balance history, SMS record, friend and custom category on this phone. " +
+                            "There is no backup — it can't be undone. Your SMS in the Messages app are not touched.",
+                    )
+                    Spacer(Modifier.height(Spacing.sm))
+                    com.spendwise.app.ui.components.TextInput(typed, { typed = it }, "Type DELETE to confirm")
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = typed.trim() == "DELETE", onClick = { confirmWipe = false; viewModel.wipeEverything() }) {
+                    Text("Delete everything", color = if (typed.trim() == "DELETE") colors.danger else colors.text3)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmWipe = false }) { Text("Cancel") } },
+            containerColor = colors.surface1,
+        )
     }
 
     if (confirmPurge) {

@@ -71,6 +71,7 @@ class SmsSync @Inject constructor(
     private val processor: IngestProcessor,
     private val rawDao: RawMessageDao,
     private val clock: Clock,
+    private val gate: com.spendwise.app.transaction.ingest.IngestGate,
 ) {
     private val _importState = MutableStateFlow<ImportState>(ImportState.Idle)
     val importState: StateFlow<ImportState> = _importState.asStateFlow()
@@ -89,8 +90,10 @@ class SmsSync @Inject constructor(
         val now = clock.now()
         val since = (rawDao.latestSentAt() ?: now) - OVERLAP_MS
         val messages = runCatching { reader.read(since, now + 60_000) }.getOrElse { return@withContext null }
-        stager.stage(messages, MessageSource.SMS_INBOX)
-        processor.drain()
+        gate.withLock {
+            stager.stageLocked(messages, MessageSource.SMS_INBOX)
+            processor.drainLocked()
+        }
     }
 
     /** One-time import over [days] (30/90/180/365), in 7-day windows so progress is real and a rerun is idempotent. */
@@ -108,8 +111,10 @@ class SmsSync @Inject constructor(
                 _importState.value = ImportState.Running(w, windows)
                 val from = start + w * WINDOW_MS
                 val to = minOf(from + WINDOW_MS, now + 60_000)
-                stager.stage(reader.read(from, to), MessageSource.SMS_INBOX)
-                summary += processor.drain()
+                summary += gate.withLock {
+                    stager.stageLocked(reader.read(from, to), MessageSource.SMS_INBOX)
+                    processor.drainLocked()
+                }
             }
             _importState.value = ImportState.Finished(summary)
         } catch (e: Exception) {

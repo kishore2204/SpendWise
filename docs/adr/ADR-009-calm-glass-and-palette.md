@@ -49,3 +49,7 @@ User feedback on ADR-008's build: *"light is too white, the glass isn't visible;
 - On empty screens there is little under the floating glass, so the effect is subtle **by design**. It becomes clearly visible once Phase 3/4 lists and amounts scroll beneath the bar.
 - GPU load drops: `drawBackdrop` passes per frame go from about 6 to 4 (tab capsule, droplet, "+", top bar), and the hidden layer is now flat.
 - Revisit the balance card in Phase 3: solid, with at most one accent glow inside it (the Visual Designer proposal).
+
+## Amendment (2026-10-08, user decision)
+- Every amount is coloured by direction: **green = money in, red = money out** — rows, transaction detail and summaries, transfers and repayments included. The subtitle (Transfer, Paid back…) says what it counts as; the colour only says which way the money moved.
+- `expense` is now a true red: dark `#FF5C5C` (6.4:1 on AMOLED black), light `#C62828` (5.6:1 on the light surface).
