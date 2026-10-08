@@ -1,5 +1,11 @@
 package com.spendwise.app.ui.components
 
+import androidx.compose.material.icons.rounded.Checkroom
+import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
+import androidx.compose.material.icons.rounded.Devices
+import androidx.compose.material.icons.rounded.FitnessCenter
+import androidx.compose.material.icons.rounded.Diamond
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -97,6 +103,12 @@ object CategoryIcons {
         "swap_horiz" -> Icons.Rounded.SwapHoriz
         "undo" -> Icons.AutoMirrored.Rounded.Undo
         "tune" -> Icons.Rounded.Tune
+        "checkroom" -> Icons.Rounded.Checkroom
+        "directions_walk" -> Icons.AutoMirrored.Rounded.DirectionsWalk
+        "devices" -> Icons.Rounded.Devices
+        "fitness_center" -> Icons.Rounded.FitnessCenter
+        "diamond" -> Icons.Rounded.Diamond
+        "trending_up" -> Icons.AutoMirrored.Rounded.TrendingUp
         else -> Icons.Rounded.HelpOutline
     }
 }

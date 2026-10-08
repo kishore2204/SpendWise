@@ -1,6 +1,9 @@
 package com.spendwise.app
 
+import android.content.Intent
 import android.os.Bundle
+import com.spendwise.app.navigation.AppLink
+import com.spendwise.app.navigation.AppLinks
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -23,6 +26,7 @@ class MainActivity : ComponentActivity() {
         // ADR-002: keep financial data out of screenshots and the recents thumbnail. Debug builds hold only
         // test data (separate .debug app), so they stay capturable for UI verification over adb.
         if (!BuildConfig.DEBUG) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (savedInstanceState == null) AppLinks.offer(AppLink.from(intent))
 
         setContent {
             val appViewModel: AppViewModel = hiltViewModel()
@@ -42,5 +46,11 @@ class MainActivity : ComponentActivity() {
                 SpendWiseNavHost()
             }
         }
+    }
+
+    /** A notification tapped while the app is open (singleTop). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        AppLinks.offer(AppLink.from(intent))
     }
 }

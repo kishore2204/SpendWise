@@ -27,6 +27,23 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.MarkEmailUnread
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import com.spendwise.app.data.db.dao.ReviewDao
+import com.spendwise.app.transaction.ingest.DetectedAccount
+import com.spendwise.app.transaction.ingest.DetectedAccounts
+import com.spendwise.app.transaction.sms.SmsSync
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import com.spendwise.app.transaction.ingest.createdPerAccount
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -101,9 +118,53 @@ sealed interface HomeUiState {
 class HomeViewModel @Inject constructor(
     repository: AccountRepository,
     private val selectedStore: SelectedAccountStore,
-    clock: Clock,
+    private val clock: Clock,
     txnDao: com.spendwise.app.data.db.dao.TxnDao,
+    reviewDao: ReviewDao,
+    private val db: com.spendwise.app.data.db.SpendWiseDatabase,
+    private val sync: SmsSync,
+    private val detectedAccounts: DetectedAccounts,
 ) : ViewModel() {
+
+    /** Pending SMS transactions of the SELECTED account only. */
+    val pendingCount: StateFlow<Int> = selectedStore.selectedAccountId.flatMapLatest { id ->
+        if (id == null) flowOf(0) else reviewDao.observePendingCount(id)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    val detected: StateFlow<List<DetectedAccount>> =
+        detectedAccounts.detected.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _smsOn = MutableStateFlow(sync.canReceiveSms())
+    val smsOn: StateFlow<Boolean> = _smsOn.asStateFlow()
+    fun recheckSms() { _smsOn.value = sync.canReceiveSms() }
+
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+    private val _refreshMessage = MutableStateFlow<String?>(null)
+    val refreshMessage: StateFlow<String?> = _refreshMessage.asStateFlow()
+
+    /** Pull-to-refresh (ADR-005 §3): re-reads bank SMS from the watermark − 72h. Never on a timer. */
+    fun refresh() {
+        if (_refreshing.value) return
+        _refreshing.value = true
+        viewModelScope.launch {
+            val summary = sync.refresh()
+            val perAccount = summary?.let { db.createdPerAccount(it.created) }.orEmpty()
+            _refreshing.value = false
+            // Counts per account by name, the selected one first — never one figure across accounts.
+            val selectedId = selectedStore.selectedAccountId.first()
+            _refreshMessage.value = when {
+                summary == null -> "Turn on SMS detection to refresh"
+                perAccount.isEmpty() -> "You're up to date"
+                else -> perAccount.sortedBy { if (it.first.id == selectedId) 0 else 1 }
+                    .joinToString(" · ") { (a, ids) -> "${ids.size} new in ${a.nickname}" }
+            }
+            delay(3_500)
+            _refreshMessage.value = null
+        }
+    }
+
+    fun notMine(account: DetectedAccount) = viewModelScope.launch { detectedAccounts.markNotMine(account.bankCode, account.last4) }
 
     private val selectedView: Flow<AccountView?> = selectedStore.selectedAccountId.flatMapLatest { id ->
         if (id == null) {
@@ -136,13 +197,59 @@ fun HomeScreen(
     onManageAccounts: () -> Unit,
     onSeeAll: () -> Unit,
     onOpenTransaction: (Long) -> Unit,
+    onReview: () -> Unit,
+    onSmsSetup: () -> Unit,
+    onAddDetected: (bankCode: String, last4: String) -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle()
+    val detected by viewModel.detected.collectAsStateWithLifecycle()
+    val smsOn by viewModel.smsOn.collectAsStateWithLifecycle()
+    val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
+    val refreshMessage by viewModel.refreshMessage.collectAsStateWithLifecycle()
+    LifecycleResumeEffect(Unit) {
+        viewModel.recheckSms()
+        onPauseOrDispose { }
+    }
+    val pullState = rememberPullToRefreshState()
     val greeting = IndiaTime.greetingFor(System.currentTimeMillis()).text
     var switcherOpen by rememberSaveable { mutableStateOf(false) }
 
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = viewModel::refresh,
+        state = pullState,
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = pullState,
+                isRefreshing = refreshing,
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+                containerColor = SpendWise.colors.surface2,
+                color = SpendWise.colors.primary,
+            )
+        },
+    ) {
     LargeTitleScreen(title = greeting, collapsedTitle = "Home") {
+        refreshMessage?.let { m ->
+            item(key = "refresh-msg") {
+                Text(
+                    m,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = SpendWise.colors.text1,
+                    modifier = Modifier
+                        .padding(horizontal = Spacing.screen, vertical = Spacing.xs)
+                        .liquidGlass(Capsule(), GlassKind.Card) // content glass: Control here would sample its own layer
+                        .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                )
+            }
+        }
+        // New accounts seen in SMS: never created automatically — the user decides (CLAUDE.md rule #1).
+        detected.forEach { d ->
+            item(key = "detected-${d.bankCode}-${d.last4}") {
+                DetectedAccountCard(d, onAdd = { onAddDetected(d.bankCode, d.last4) }, onNotMine = { viewModel.notMine(d) })
+            }
+        }
         when (val s = state) {
             HomeUiState.Loading -> Unit
             HomeUiState.NoAccounts -> item(key = "start", contentType = "hero") { StartCard(onAddAccount) }
@@ -161,6 +268,26 @@ fun HomeScreen(
                     )
                 }
                 item(key = "hero", contentType = "hero") { BalanceHero(s.selected) }
+                if (pendingCount > 0) {
+                    item(key = "pending") {
+                        Spacer(Modifier.height(Spacing.sm))
+                        com.spendwise.app.ui.components.GroupCard {
+                            ListRow(
+                                title = "$pendingCount to review",
+                                subtitle = "Detected from SMS · not counted until you confirm",
+                                leadingIcon = Icons.Rounded.MarkEmailUnread,
+                                leadingTint = SpendWise.colors.pending,
+                                onClick = onReview,
+                            ) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = SpendWise.colors.text3) }
+                        }
+                    }
+                }
+                if (!smsOn) {
+                    item(key = "sms-off") {
+                        Spacer(Modifier.height(Spacing.sm))
+                        com.spendwise.app.feature.sms.SmsOffCard(onSmsSetup)
+                    }
+                }
                 item(key = "recent-label") { SectionLabel("Recent transactions") }
                 item(key = "recent") {
                     val recent = s.selected.recent
@@ -182,6 +309,33 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+    }
+    }
+}
+
+/** "New account detected · HDFC ••••1234" with Not mine / Add account (ADR-005 §7). Identity only, no amounts. */
+@Composable
+private fun DetectedAccountCard(d: DetectedAccount, onAdd: () -> Unit, onNotMine: () -> Unit) {
+    val colors = SpendWise.colors
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.screen, vertical = Spacing.xs)
+            .liquidGlass(RoundedCornerShape(Radius.card), GlassKind.Card)
+            .padding(Spacing.md),
+    ) {
+        Text("New account detected", style = MaterialTheme.typography.labelMedium, color = colors.text2)
+        Text("${d.bankName} ••••${d.last4}", style = MaterialTheme.typography.titleMedium, color = colors.text1)
+        Text(
+            "${d.messageCount} SMS waiting. Add it to see them, or tell SpendWise it isn't yours.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.text2,
+        )
+        Spacer(Modifier.height(Spacing.sm))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            TextButton(onClick = onNotMine) { Text("Not mine", color = colors.text2) }
+            LiquidPrimaryButton(text = "Add account", icon = Icons.Rounded.Add, onClick = onAdd, modifier = Modifier.weight(1f))
         }
     }
 }

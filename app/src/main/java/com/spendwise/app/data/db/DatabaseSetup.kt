@@ -108,18 +108,46 @@ object DatabaseSetup {
         SeedCategory(25, "Insurance", "EXPENSE", "shield", 6),
         SeedCategory(26, "Gifts & Donations", "EXPENSE", "redeem", 7),
         SeedCategory(27, "Other", "EXPENSE", "more_horiz", 8),
+        // Added 2026-10-08 with the merchant dictionary (seeded on open for existing installs).
+        SeedCategory(28, "Clothing", "EXPENSE", "checkroom", 9),
+        SeedCategory(29, "Footwear", "EXPENSE", "directions_walk", 10),
+        SeedCategory(30, "Electronics", "EXPENSE", "devices", 11),
+        SeedCategory(31, "Fitness", "EXPENSE", "fitness_center", 0),
+        SeedCategory(32, "Jewellery", "EXPENSE", "diamond", 1),
+        SeedCategory(33, "Investment", "EXPENSE", "trending_up", 2),
         SeedCategory(50, "Salary", "INCOME", "work", 9),
         SeedCategory(51, "Interest", "INCOME", "percent", 10),
         SeedCategory(52, "Cashback & Rewards", "INCOME", "card_giftcard", 11),
         SeedCategory(53, "Other income", "INCOME", "add_circle", 0),
     )
 
+    /** "Other" always sorts last, however many categories are added later. */
+    private const val LAST = 99
+
     fun seed(db: SupportSQLiteDatabase) {
         SEED.forEachIndexed { index, c ->
             db.execSQL(
                 "INSERT OR IGNORE INTO category (id, name, kind, iconKey, colorIndex, isSystem, sortOrder, archivedAt) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
-                arrayOf<Any>(c.id, c.name, c.kind, c.icon, c.color, if (c.system) 1 else 0, index),
+                arrayOf<Any>(c.id, c.name, c.kind, c.icon, c.color, if (c.system) 1 else 0, if (c.id == 27L) LAST else index),
             )
         }
+    }
+
+    /**
+     * Idempotent, runs on every open: categories added in an app update reach existing installs, and every account
+     * sees them in its own overlay (ADR-001). Never touches a row that already exists (user choices are kept).
+     */
+    fun seedOnOpen(db: SupportSQLiteDatabase) {
+        seed(db)
+        db.execSQL("UPDATE category SET sortOrder = $LAST WHERE id = 27")
+        db.execSQL("UPDATE account_category SET sortOrder = $LAST WHERE categoryId = 27")
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO account_category (accountId, categoryId, hidden, sortOrder)
+            SELECT a.id, c.id, 0, c.sortOrder FROM account a CROSS JOIN category c
+            WHERE c.archivedAt IS NULL
+              AND NOT EXISTS (SELECT 1 FROM account_category x WHERE x.accountId = a.id AND x.categoryId = c.id)
+            """.trimIndent(),
+        )
     }
 }

@@ -86,3 +86,16 @@
 ## Revisit if
 - One UI deep sleep still drops broadcasts even after the battery guidance.
 - `date_sent` turns out to differ between the broadcast and the provider on this device. Verify this on the phone in Phase 5.
+
+## Phase 5 implementation notes (2026-10-08)
+- **Historical import** runs as a unique WorkManager job (`SmsImportWorker`), not a foreground `dataSync` service: one 7-day window at a time, idempotent through fingerprints, so a killed run is simply rerun. Revisit if imports ever exceed WorkManager's 10-minute budget.
+- **Watermark** for pull-to-refresh is `MAX(raw_message.sentAt)` from the database, not a DataStore value — it can never drift from what was actually stored.
+- **Unknown accounts** wait as `ParseStatus.UNKNOWN_ACCOUNT` (body kept) and are re-queued whenever an account is added or one is marked Not mine. An archived account's SMS goes to "Couldn't read", never into the hidden account.
+- **No last4 in the SMS** (debit-card spends, some formats): assigned only when the user has exactly one active account at that bank AND no other account of that bank is known (Not mine or waiting). Always NEEDS_REVIEW. Debit-card digits never identify an account.
+- **Never HIGH confidence** (so never one-tap/confirm-all): possible duplicates, a possible own-account transfer (the other pending side is demoted too), reversals, refunds, credits on a credit card, and SMS that may be covered by a balance anchor (anchor between the earliest moment the money could have moved and when the SMS was seen).
+- **Delayed SMS** keep the bank's earlier date, placed at the end of that day but never after the send time.
+- **Same bank reference, different amount** is reviewed as a possible duplicate, never silently attached.
+- **Original SMS** text is shown on the review list, transaction detail and edit screens (on-device only; redacted of OTPs/links; dropped when ignored or purged).
+- **Notifications** group per account (one summary per account, never a mixed count); the review deep link carries its account and selects it.
+- **Debug builds** never get SMS access. `app/src/debug` has `DebugSeedReceiver` (shell-only via DUMP) that pushes anonymized fake bank SMS through the real pipeline for on-phone testing.
+- Verified on the emulator: live broadcast → pending → notification (lock-screen version has no amount); balance unchanged until confirm.

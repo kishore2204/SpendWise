@@ -32,6 +32,8 @@ import com.spendwise.app.data.db.entity.AccountType
 import com.spendwise.app.domain.AccountLedger
 import com.spendwise.app.domain.CreateAccountResult
 import com.spendwise.app.domain.NewAccount
+import com.spendwise.app.transaction.ingest.DetectedAccounts
+import com.spendwise.app.transaction.parsing.BankRegistry
 import com.spendwise.app.ui.components.GroupCard
 import com.spendwise.app.ui.components.LargeTitleScreen
 import com.spendwise.app.ui.components.LiquidPrimaryButton
@@ -63,6 +65,8 @@ data class AddAccountForm(
     val fieldErrorAmount: String? = null,
     val saving: Boolean = false,
     val createdId: Long? = null,
+    /** Bank code of an account detected in SMS (e.g. SBI): kept exactly, so its messages match the new account. */
+    val detectedCode: String? = null,
 ) {
     val isCash get() = bank == BankPreset.Cash
     val isCreditCard get() = type == AccountType.CREDIT_CARD
@@ -73,7 +77,25 @@ data class AddAccountForm(
 class AddAccountViewModel @Inject constructor(
     private val ledger: AccountLedger,
     private val selected: SelectedAccountStore,
+    private val detected: DetectedAccounts,
 ) : ViewModel() {
+    private var prefilled = false
+
+    /** "Add account" from a "New account detected" card: bank and digits come from the SMS. */
+    fun prefill(bankCode: String?, last4: String?) {
+        if (prefilled || bankCode == null) return
+        prefilled = true
+        val preset = BankPreset.entries.firstOrNull { it.code == bankCode && it != BankPreset.Other }
+        _form.update {
+            it.copy(
+                bank = preset ?: BankPreset.Other,
+                otherBankName = if (preset == null) BankRegistry.displayName(bankCode) else "",
+                last4 = last4.orEmpty(),
+                detectedCode = if (preset == null) bankCode else null,
+            )
+        }
+    }
+
     private val _form = MutableStateFlow(AddAccountForm())
     val form: StateFlow<AddAccountForm> = _form.asStateFlow()
 
@@ -96,8 +118,9 @@ class AddAccountViewModel @Inject constructor(
             _form.update { it.copy(fieldErrorLast4 = "Enter exactly 4 digits") }
             return
         }
-        val code = when (f.bank) {
-            BankPreset.Other -> f.otherBankName.uppercase().filter(Char::isLetterOrDigit).take(8)
+        val code = when {
+            f.detectedCode != null && f.bank == BankPreset.Other -> f.detectedCode
+            f.bank == BankPreset.Other -> f.otherBankName.uppercase().filter(Char::isLetterOrDigit).take(8)
             else -> f.bank.code
         }
         _form.update { it.copy(saving = true) }
@@ -105,6 +128,8 @@ class AddAccountViewModel @Inject constructor(
             val result = ledger.createAccount(NewAccount(code, f.bankName, f.last4, f.nickname, f.type, amount))
             when (result) {
                 is CreateAccountResult.Created -> {
+                    // SMS that were waiting for this account (UNKNOWN_ACCOUNT) become pending transactions in it.
+                    detected.reprocess()
                     // The first account becomes the one shown on Home.
                     if (selected.selectedAccountId.first() == null || selected.selectedAccountId.first() == result.accountId) {
                         selected.select(result.accountId)
@@ -124,9 +149,12 @@ class AddAccountViewModel @Inject constructor(
 fun AddAccountScreen(
     onClose: () -> Unit,
     onCreated: (Long) -> Unit,
+    prefillBankCode: String? = null,
+    prefillLast4: String? = null,
     viewModel: AddAccountViewModel = hiltViewModel(),
 ) {
     val form by viewModel.form.collectAsStateWithLifecycle()
+    LaunchedEffect(prefillBankCode, prefillLast4) { viewModel.prefill(prefillBankCode, prefillLast4) }
     val colors = SpendWise.colors
     BackHandler(onBack = onClose)
     LaunchedEffect(form.createdId) { form.createdId?.let(onCreated) }

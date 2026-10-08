@@ -38,7 +38,8 @@ enum class PaymentMethod { UPI, CARD, NETBANKING, NEFT, IMPS, RTGS, ATM, CASH, C
 
 enum class MessageSource { SMS_LIVE, SMS_INBOX, MANUAL_IMPORT }
 
-enum class ParseStatus { RECEIVED, PARSED, NOT_FINANCIAL, FINANCIAL_UNPARSED, NOT_MINE, ERROR }
+/** UNKNOWN_ACCOUNT: a readable transaction for a bank account not in the app and not marked "Not mine" (ADR-005 §7). */
+enum class ParseStatus { RECEIVED, PARSED, NOT_FINANCIAL, FINANCIAL_UNPARSED, UNKNOWN_ACCOUNT, NOT_MINE, ERROR }
 
 enum class AnchorSource { OPENING, MANUAL, RECONCILE }
 

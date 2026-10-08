@@ -143,8 +143,13 @@ class AddTransactionViewModel @AssistedInject constructor(
 
     private var suggestJob: Job? = null
 
+    /** When editing an SMS-detected transaction: the message(s) it came from, shown for reference. */
+    private val _sources = MutableStateFlow<List<com.spendwise.app.data.db.entity.RawMessageEntity>>(emptyList())
+    val sources: StateFlow<List<com.spendwise.app.data.db.entity.RawMessageEntity>> = _sources.asStateFlow()
+
     init {
         viewModelScope.launch {
+            if (editId != null) _sources.value = db.rawMessageDao().sourcesFor(editId)
             if (editId != null) loadForEdit(editId) else _form.update { it.copy(accountId = selected.selectedAccountId.first()) }
         }
     }
@@ -265,6 +270,7 @@ fun AddTransactionScreen(
     val form by viewModel.form.collectAsStateWithLifecycle()
     val accounts by viewModel.accounts.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
+    val sources by viewModel.sources.collectAsStateWithLifecycle()
     val colors = SpendWise.colors
     var showDate by remember { mutableStateOf(false) }
     val amountFocus = remember { FocusRequester() }
@@ -292,6 +298,12 @@ fun AddTransactionScreen(
                             modifier = Modifier.padding(Spacing.sm),
                         )
                     }
+                    Spacer(Modifier.height(Spacing.md))
+                }
+            }
+            if (sources.isNotEmpty()) {
+                item(key = "sms") {
+                    com.spendwise.app.feature.sms.OriginalSmsCard(sources)
                     Spacer(Modifier.height(Spacing.md))
                 }
             }

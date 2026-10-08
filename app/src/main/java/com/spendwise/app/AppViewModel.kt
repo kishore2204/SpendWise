@@ -13,7 +13,11 @@ import javax.inject.Inject
 @HiltViewModel
 class AppViewModel @Inject constructor(
     preferences: UserPreferencesRepository,
+    private val selected: com.spendwise.app.data.account.SelectedAccountStore,
 ) : ViewModel() {
+    /** A notification about account X opens X — never X's rows under another account's header. */
+    suspend fun select(accountId: Long) = selected.select(accountId)
+
     // Eagerly so the first frame already has the stored theme (default: Dark AMOLED).
     val themeMode: StateFlow<ThemeMode> =
         preferences.themeMode.stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.Dark)

@@ -17,6 +17,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.CallSplit
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.AlertDialog
@@ -47,7 +49,11 @@ import com.spendwise.app.data.db.SpendWiseDatabase
 import com.spendwise.app.data.db.dao.TxnRow
 import com.spendwise.app.data.db.entity.CategoryEntity
 import com.spendwise.app.data.db.entity.CategoryKind
+import com.spendwise.app.data.db.entity.Confidence
 import com.spendwise.app.data.db.entity.TxnKind
+import com.spendwise.app.data.db.entity.TxnStatus
+import com.spendwise.app.transaction.ingest.IngestProcessor
+import com.spendwise.app.ui.components.LiquidPrimaryButton
 import com.spendwise.app.data.db.entity.TxnSplitEntity
 import com.spendwise.app.domain.LedgerResult
 import com.spendwise.app.domain.SplitPart
@@ -90,7 +96,15 @@ data class TxnDetailState(
     val categories: List<CategoryEntity> = emptyList(),
     val refundable: Long = 0,
     val deleted: Boolean = false,
+    /** Phase 5 review: other-account legs that could be the other side of this one (never paired automatically). */
+    val pairSuggestions: List<PairSuggestion> = emptyList(),
+    /** The SMS landed shortly after a balance the user entered — it may already be included (ADR-004 latency). */
+    val nearAnchor: Boolean = false,
+    /** The bank SMS this transaction came from (empty for manual entries). */
+    val sources: List<com.spendwise.app.data.db.entity.RawMessageEntity> = emptyList(),
 )
+
+data class PairSuggestion(val txnId: Long, val accountName: String, val sharedRef: Boolean, val otherPending: Boolean, val otherAt: Long)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel(assistedFactory = TransactionDetailViewModel.Factory::class)
@@ -124,7 +138,27 @@ class TransactionDetailViewModel @AssistedInject constructor(
         } else {
             0
         }
-        st.copy(refundable = refundable)
+        val pending = r.status == TxnStatus.PENDING
+        val suggestions = if (r.status != TxnStatus.IGNORED && r.counterpartyAccount == null) {
+            val self = db.txnDao().getById(r.id)
+            ledger.transferSuggestions(r.id).mapNotNull { o ->
+                val account = db.accountDao().getById(o.accountId) ?: return@mapNotNull null
+                PairSuggestion(
+                    o.id,
+                    "${account.nickname} ••${account.last4}".trimEnd(' ', '•'),
+                    self?.bankRef != null && self.bankRef == o.bankRef,
+                    otherPending = o.status == TxnStatus.PENDING,
+                    otherAt = o.occurredAt,
+                )
+            }
+        } else {
+            emptyList()
+        }
+        val entity = db.txnDao().getById(r.id)
+        val nearAnchor = pending && entity != null && db.ledgerDao().latestAnchor(r.accountId)?.let { a ->
+            IngestProcessor.anchorMayCover(a.effectiveAt, entity.occurredAt, entity.timeSource, entity.createdAt)
+        } == true
+        st.copy(refundable = refundable, pairSuggestions = suggestions, nearAnchor = nearAnchor, sources = db.rawMessageDao().sourcesFor(r.id))
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TxnDetailState())
 
     /** Guards against a double tap creating two refunds (each would fit under the cap on its own). */
@@ -150,6 +184,13 @@ class TransactionDetailViewModel @AssistedInject constructor(
     fun split(parts: List<SplitPart>, onDone: () -> Unit) = run({ ledger.setSplits(txnId, parts) }, onDone)
 
     fun unsplit() = viewModelScope.launch { ledger.removeSplits(txnId, state.value.splits.maxByOrNull { abs(it.amountPaise) }?.categoryId) }
+
+    /** Review (Phase 5): the user's decision is the only thing that makes an SMS transaction count. */
+    fun confirm(categoryId: Long?) = run({ ledger.confirm(txnId, categoryId) }, {})
+
+    fun ignore(onDone: () -> Unit) = run({ ledger.ignore(txnId) }, onDone)
+
+    fun pair(otherId: Long) = run({ ledger.pairAsTransfer(txnId, otherId) }, {})
 
     fun delete() = viewModelScope.launch {
         when (val r = ledger.delete(txnId)) {
@@ -208,6 +249,41 @@ fun TransactionDetailScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.text2,
                     )
+                }
+            }
+            if (row.status == TxnStatus.PENDING) {
+                item(key = "review") {
+                    ReviewPanel(
+                        row = row,
+                        categories = state.categories,
+                        nearAnchor = state.nearAnchor,
+                        onConfirm = viewModel::confirm,
+                        onIgnore = { viewModel.ignore(onClose) },
+                    )
+                }
+            }
+            if (state.sources.isNotEmpty()) {
+                item(key = "sms") { com.spendwise.app.feature.sms.OriginalSmsCard(state.sources) }
+            }
+            if (state.pairSuggestions.isNotEmpty()) {
+                item(key = "pair-label") { SectionLabel("Is this a transfer between your accounts?") }
+                item(key = "pair") {
+                    GroupCard {
+                        state.pairSuggestions.forEachIndexed { i, s ->
+                            ListRow(
+                                title = if (row.amountPaise < 0) "Moved to ${s.accountName}" else "Came from ${s.accountName}",
+                                subtitle = buildString {
+                                    append(if (s.sharedRef) "Same bank reference" else "Same amount, minutes apart")
+                                    append(" · ")
+                                    append(TxnText.day(IndiaTime.localDate(s.otherAt), IndiaTime.localDate(System.currentTimeMillis())))
+                                    if (s.otherPending) append(" · pairing confirms both sides")
+                                },
+                                leadingIcon = Icons.Rounded.SwapHoriz,
+                                onClick = { viewModel.pair(s.txnId) },
+                            ) { Text("Pair", color = colors.primary, style = MaterialTheme.typography.labelLarge) }
+                            if (i < state.pairSuggestions.lastIndex) HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
+                        }
+                    }
                 }
             }
             item(key = "info-label") { SectionLabel("Details") }
@@ -304,6 +380,64 @@ fun TransactionDetailScreen(
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
             containerColor = colors.surface1,
         )
+    }
+}
+
+/** Waiting for review: keep or change the suggested category, then Confirm — or Ignore. Nothing counts until then. */
+@Composable
+private fun ReviewPanel(
+    row: TxnRow,
+    categories: List<CategoryEntity>,
+    nearAnchor: Boolean,
+    onConfirm: (Long?) -> Unit,
+    onIgnore: () -> Unit,
+) {
+    val colors = SpendWise.colors
+    var chosen by remember(row.id) { mutableStateOf(row.categoryId) }
+    val categorisable = row.kind == TxnKind.EXPENSE || row.kind == TxnKind.INCOME || row.kind == TxnKind.FEE
+    Spacer(Modifier.height(Spacing.md))
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.screen)
+            .liquidGlass(RoundedCornerShape(Radius.card), GlassKind.Card)
+            .padding(vertical = Spacing.md),
+    ) {
+        Column(Modifier.padding(horizontal = Spacing.md)) {
+            Text("Waiting for your review", style = MaterialTheme.typography.titleSmall, color = colors.pending)
+            Spacer(Modifier.height(Spacing.xxs))
+            val why = when {
+                row.possibleDupOfId != null -> "This may repeat another transaction close in time. Ignore it if it's the same one."
+                nearAnchor -> "This arrived just after you set the balance. If that balance already included it, ignore this."
+                row.confidence != Confidence.HIGH -> "Read from an SMS format we're less sure about. Check the details."
+                else -> "Detected from your bank's SMS. It won't count until you confirm it."
+            }
+            Text(why, style = MaterialTheme.typography.bodySmall, color = colors.text2)
+        }
+        if (categorisable && categories.isNotEmpty()) {
+            Spacer(Modifier.height(Spacing.sm))
+            ChipRow(
+                options = categories,
+                selected = categories.firstOrNull { it.id == chosen },
+                label = { it.name },
+                icon = { CategoryIcons.of(it.iconKey) },
+                onSelect = { chosen = it.id },
+            )
+        }
+        Spacer(Modifier.height(Spacing.md))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onIgnore) { Text("Ignore", color = colors.text2) }
+            LiquidPrimaryButton(
+                text = "Confirm",
+                icon = Icons.Rounded.Check,
+                onClick = { onConfirm(chosen.takeIf { categorisable && it != row.categoryId }) },
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 

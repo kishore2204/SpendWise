@@ -34,11 +34,31 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Sms
+import androidx.compose.material.icons.rounded.SmsFailed
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import com.spendwise.app.data.db.dao.RawMessageDao
+import com.spendwise.app.transaction.sms.SmsSync
 
 @HiltViewModel
 class MoreViewModel @Inject constructor(
     private val preferences: UserPreferencesRepository,
+    private val rawDao: RawMessageDao,
+    private val sync: SmsSync,
 ) : ViewModel() {
+    val unreadableCount: StateFlow<Int> = rawDao.observeUnreadableCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+    fun smsOn() = sync.canReceiveSms()
+
+    /** Settings → "Purge raw SMS text" (ADR-005 §10): parsed transactions stay, the message text goes. */
+    fun purgeSmsText() = viewModelScope.launch { rawDao.purgeBodies() }
+
     val themeMode: StateFlow<ThemeMode> =
         preferences.themeMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemeMode.Dark)
     val reduceTransparency: StateFlow<Boolean> =
@@ -49,8 +69,19 @@ class MoreViewModel @Inject constructor(
 }
 
 @Composable
-fun MoreScreen(viewModel: MoreViewModel = hiltViewModel()) {
+fun MoreScreen(
+    onSmsSetup: () -> Unit,
+    onUnreadable: () -> Unit,
+    viewModel: MoreViewModel = hiltViewModel(),
+) {
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val unreadable by viewModel.unreadableCount.collectAsStateWithLifecycle()
+    var smsOn by remember { mutableStateOf(viewModel.smsOn()) }
+    var confirmPurge by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(Unit) {
+        smsOn = viewModel.smsOn()
+        onPauseOrDispose { }
+    }
     val reduceTransparency by viewModel.reduceTransparency.collectAsStateWithLifecycle()
     val colors = SpendWise.colors
 
@@ -93,6 +124,33 @@ fun MoreScreen(viewModel: MoreViewModel = hiltViewModel()) {
             }
         }
 
+        item(key = "sms-label") { SectionLabel("Bank SMS") }
+        item(key = "sms") {
+            GroupCard {
+                ListRow(
+                    title = "SMS detection",
+                    subtitle = if (smsOn) "On · import past SMS, check status" else "Off · Set up",
+                    leadingIcon = Icons.Rounded.Sms,
+                    onClick = onSmsSetup,
+                )
+                HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
+                ListRow(
+                    title = "Couldn't read",
+                    subtitle = if (unreadable == 0) "Every bank SMS so far was understood" else "$unreadable bank SMS need a look",
+                    leadingIcon = Icons.Rounded.SmsFailed,
+                    leadingTint = if (unreadable > 0) colors.pending else colors.text2,
+                    onClick = onUnreadable,
+                )
+                HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
+                ListRow(
+                    title = "Delete stored SMS text",
+                    subtitle = "Keeps your transactions; removes the message text SpendWise kept",
+                    leadingIcon = Icons.Rounded.DeleteSweep,
+                    onClick = { confirmPurge = true },
+                )
+            }
+        }
+
         item(key = "privacy-label") { SectionLabel("Privacy") }
         item(key = "privacy") {
             GroupCard {
@@ -130,5 +188,16 @@ fun MoreScreen(viewModel: MoreViewModel = hiltViewModel()) {
                 )
             }
         }
+    }
+
+    if (confirmPurge) {
+        AlertDialog(
+            onDismissRequest = { confirmPurge = false },
+            title = { Text("Delete stored SMS text?") },
+            text = { Text("Your transactions stay. SpendWise forgets the text of the bank SMS they came from. SMS still in your Messages app are not touched.") },
+            confirmButton = { TextButton(onClick = { confirmPurge = false; viewModel.purgeSmsText() }) { Text("Delete", color = colors.danger) } },
+            dismissButton = { TextButton(onClick = { confirmPurge = false }) { Text("Cancel") } },
+            containerColor = colors.surface1,
+        )
     }
 }

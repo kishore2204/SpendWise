@@ -20,6 +20,11 @@ object IndiaTime {
         return date.atTime(time).atZone(ZONE).toInstant().toEpochMilli()
     }
 
+    fun startOfDay(date: LocalDate): Long = date.atStartOfDay(ZONE).toInstant().toEpochMilli()
+
+    /** The last millisecond of an IST day. */
+    fun endOfDay(date: LocalDate): Long = startOfDay(date.plusDays(1)) - 1
+
     fun greetingFor(epochMillis: Long): Greeting = when (Instant.ofEpochMilli(epochMillis).atZone(ZONE).hour) {
         in 5..11 -> Greeting.Morning
         in 12..16 -> Greeting.Afternoon

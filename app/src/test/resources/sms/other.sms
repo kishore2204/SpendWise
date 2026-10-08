@@ -1,0 +1,38 @@
+id: sbi-generic-new-bank
+origin: synthetic
+sender: VM-SBIINB-S
+sentAt: 2026-10-07T11:00
+expect: PARSED
+parser: generic
+amount: 100000
+direction: OUT
+last4: 4321
+confidence: NEEDS_REVIEW
+---
+Dear Customer, your A/c X4321 is debited by Rs.1000.00 on 07Oct26 transfer to Ravi Ref No 600000000401. -SBI
+===
+id: phone-number-sender-never-trusted
+origin: synthetic
+sender: +919876543210
+sentAt: 2026-10-07T11:00
+expect: NOT_TRANSACTION
+reject: NOT_FINANCIAL
+---
+Sent Rs.23.00 from A/c *0000 on 07-10-26 to CUMTA.RRN 600000000001.Avl Bal Rs.2844.44.Not you?SMS BLOCK to 9289592895-Indian Bank
+===
+id: unknown-dlt-sender
+origin: synthetic
+sender: VM-SWIGGY-S
+sentAt: 2026-10-07T11:00
+expect: NOT_TRANSACTION
+reject: NOT_FINANCIAL
+---
+Your order of Rs.450.00 has been paid. Enjoy your meal!
+===
+id: known-bank-unreadable
+origin: synthetic
+sender: VM-INDBNK-S
+sentAt: 2026-10-07T11:00
+expect: UNRECOGNIZED
+---
+Rs.250.00 has been processed on your A/c *0000. Ref 600000000501

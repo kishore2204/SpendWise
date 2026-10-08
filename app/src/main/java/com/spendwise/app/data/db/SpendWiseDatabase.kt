@@ -50,6 +50,9 @@ abstract class SpendWiseDatabase : RoomDatabase() {
     abstract fun ledgerDao(): LedgerDao
     abstract fun accountCategoryDao(): AccountCategoryDao
     abstract fun merchantRuleDao(): com.spendwise.app.data.db.dao.MerchantRuleDao
+    abstract fun rawMessageDao(): com.spendwise.app.data.db.dao.RawMessageDao
+    abstract fun notMineDao(): com.spendwise.app.data.db.dao.NotMineDao
+    abstract fun reviewDao(): com.spendwise.app.data.db.dao.ReviewDao
 
     companion object {
         const val NAME = "spendwise.db"
@@ -64,6 +67,7 @@ abstract class SpendWiseDatabase : RoomDatabase() {
 
         override fun onOpen(db: SupportSQLiteDatabase) {
             DatabaseSetup.createTriggers(db)
+            DatabaseSetup.seedOnOpen(db)
         }
     }
 }

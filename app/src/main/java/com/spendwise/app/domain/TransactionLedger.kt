@@ -159,11 +159,7 @@ class TransactionLedger @Inject constructor(
         return db.withTransaction {
             val from = db.accountDao().getById(fromAccountId) ?: return@withTransaction LedgerResult.Rejected("Account not found")
             val to = db.accountDao().getById(toAccountId) ?: return@withTransaction LedgerResult.Rejected("Account not found")
-            val (outKind, inKind, method) = when {
-                to.type == AccountType.CASH && from.type != AccountType.CASH -> Triple(TxnKind.ATM_WITHDRAWAL, TxnKind.TRANSFER_IN, PaymentMethod.ATM)
-                from.type == AccountType.CASH && to.type != AccountType.CASH -> Triple(TxnKind.TRANSFER_OUT, TxnKind.CASH_DEPOSIT, PaymentMethod.CASH)
-                else -> Triple(TxnKind.TRANSFER_OUT, TxnKind.TRANSFER_IN, PaymentMethod.UNKNOWN)
-            }
+            val (outKind, inKind, method) = transferKinds(from.type, to.type)
             fun leg(accountId: Long, signed: Long, kind: TxnKind) = TxnEntity(
                 accountId = accountId,
                 amountPaise = signed,
@@ -304,6 +300,118 @@ class TransactionLedger @Inject constructor(
         LedgerResult.Ok(txnId)
     }
 
+    // ---------------------------------------------------------------- review (Phase 5)
+
+    /**
+     * PENDING → CONFIRMED, the only way an SMS-detected transaction starts to count. [categoryId], when given,
+     * replaces the suggestion and teaches the merchant rule. Confirming an ATM withdrawal (or cash deposit) also
+     * books the Cash-wallet leg, so bank → Cash is one transfer with two legs — never an expense.
+     */
+    suspend fun confirm(txnId: Long, categoryId: Long? = null): LedgerResult = db.withTransaction { confirmInTransaction(txnId, categoryId) }
+
+    /** Confirms every HIGH-confidence pending row of ONE account that is not a possible duplicate. */
+    suspend fun confirmAllHighConfidence(accountId: Long): Int = db.withTransaction {
+        db.reviewDao().pendingHighIds(accountId).count { confirmInTransaction(it, null) is LedgerResult.Ok }
+    }
+
+    private suspend fun confirmInTransaction(txnId: Long, categoryId: Long?): LedgerResult {
+        val t = txnDao.getById(txnId) ?: return LedgerResult.Rejected("Transaction not found")
+        if (t.status != TxnStatus.PENDING) return LedgerResult.Rejected("Already reviewed")
+        val cashMove = (t.kind == TxnKind.ATM_WITHDRAWAL || t.kind == TxnKind.CASH_DEPOSIT) && txnDao.transferFor(t.id) == null
+        val cash = if (cashMove) db.accountDao().cashWallet()?.takeIf { it.id != t.accountId } else null
+        // Bank ↔ Cash is a transfer with two legs; without a wallet it would be money that vanishes from analytics.
+        if (cashMove && cash == null) return LedgerResult.Rejected("Add a Cash wallet first, so the cash has somewhere to go")
+        val now = clock.now()
+        val recategorise = categoryId != null && t.kind in SPLITTABLE && txnDao.getSplits(t.id).isEmpty()
+        val category = if (recategorise) categoryId else t.categoryId
+        txnDao.update(t.copy(status = TxnStatus.CONFIRMED, categoryId = category, updatedAt = now))
+        if (recategorise) {
+            learn(t.merchantKey, categoryId, now)
+            txnDao.setRefundsCategory(t.id, categoryId)
+        }
+        if (cash != null) {
+            val cashKind = if (t.kind == TxnKind.ATM_WITHDRAWAL) TxnKind.TRANSFER_IN else TxnKind.TRANSFER_OUT
+            val signed = signedFor(cashKind, abs(t.amountPaise))
+            val cashLeg = txnDao.insert(
+                TxnEntity(
+                    accountId = cash.id,
+                    amountPaise = signed,
+                    isCredit = signed > 0,
+                    kind = cashKind,
+                    status = TxnStatus.CONFIRMED,
+                    confidence = Confidence.HIGH,
+                    occurredAt = t.occurredAt,
+                    localEpochDay = t.localEpochDay,
+                    timeSource = t.timeSource,
+                    categoryId = DatabaseSetup.CATEGORY_TRANSFER,
+                    paymentMethod = t.paymentMethod,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
+            val (fromId, toId) = if (t.kind == TxnKind.ATM_WITHDRAWAL) t.id to cashLeg else cashLeg to t.id
+            txnDao.insertTransfer(TransferEntity(fromTxnId = fromId, toTxnId = toId, createdAt = now))
+        }
+        return LedgerResult.Ok(t.id)
+    }
+
+    /** PENDING → IGNORED. The row stays (its dedup keys keep blocking re-imports) but its SMS text is dropped. */
+    suspend fun ignore(txnId: Long): LedgerResult = db.withTransaction {
+        val t = txnDao.getById(txnId) ?: return@withTransaction LedgerResult.Rejected("Transaction not found")
+        if (t.status != TxnStatus.PENDING) return@withTransaction LedgerResult.Rejected("Only a transaction waiting for review can be ignored")
+        txnDao.update(t.copy(status = TxnStatus.IGNORED, updatedAt = clock.now()))
+        db.rawMessageDao().dropBodiesFor(txnId)
+        LedgerResult.Ok(txnId)
+    }
+
+    /** Other-account legs that could be the other side of [txnId] (same RRN, or same amount within 10 min). Rows only. */
+    suspend fun transferSuggestions(txnId: Long): List<TxnEntity> {
+        val t = txnDao.getById(txnId) ?: return emptyList()
+        if (t.status == TxnStatus.IGNORED || t.refundOfId != null || t.kind !in PAIRABLE || txnDao.transferFor(txnId) != null) return emptyList()
+        return db.reviewDao().transferCandidates(t.accountId, t.amountPaise, t.bankRef, t.occurredAt, PAIR_WINDOW_MS)
+    }
+
+    /**
+     * The user says two legs are one transfer between their own accounts (ADR-005 §6 — never paired automatically).
+     * Both become confirmed transfer legs: no longer income or expense, no merchant, linked by one transfer row.
+     */
+    suspend fun pairAsTransfer(aId: Long, bId: Long): LedgerResult = db.withTransaction {
+        val a = txnDao.getById(aId) ?: return@withTransaction LedgerResult.Rejected("Transaction not found")
+        val b = txnDao.getById(bId) ?: return@withTransaction LedgerResult.Rejected("Transaction not found")
+        val problem = when {
+            a.accountId == b.accountId -> "A transfer is between two different accounts"
+            a.amountPaise != -b.amountPaise -> "The amounts don't match"
+            a.status == TxnStatus.IGNORED || b.status == TxnStatus.IGNORED -> "One of them was ignored"
+            a.kind !in PAIRABLE || b.kind !in PAIRABLE -> "Only payments and receipts can be paired"
+            a.refundOfId != null || b.refundOfId != null || txnDao.refundCount(aId) > 0 || txnDao.refundCount(bId) > 0 ->
+                "Refunded transactions can't become a transfer"
+            txnDao.transferFor(aId) != null || txnDao.transferFor(bId) != null -> "Already part of a transfer"
+            else -> null
+        }
+        if (problem != null) return@withTransaction LedgerResult.Rejected(problem)
+        val (out, into) = if (a.amountPaise < 0) a to b else b to a
+        val from = db.accountDao().getById(out.accountId) ?: return@withTransaction LedgerResult.Rejected("Account not found")
+        val to = db.accountDao().getById(into.accountId) ?: return@withTransaction LedgerResult.Rejected("Account not found")
+        val (outKind, inKind, _) = transferKinds(from.type, to.type)
+        val now = clock.now()
+        for ((leg, kind) in listOf(out to outKind, into to inKind)) {
+            txnDao.clearSplits(leg.id)
+            txnDao.update(
+                leg.copy(
+                    kind = kind,
+                    status = TxnStatus.CONFIRMED,
+                    categoryId = DatabaseSetup.CATEGORY_TRANSFER,
+                    merchantRaw = null,
+                    merchantKey = null,
+                    counterpartyKind = CounterpartyKind.UNKNOWN,
+                    possibleDupOfId = null,
+                    updatedAt = now,
+                ),
+            )
+        }
+        LedgerResult.Ok(txnDao.insertTransfer(TransferEntity(fromTxnId = out.id, toTxnId = into.id, createdAt = now)))
+    }
+
     // ---------------------------------------------------------------- categories
 
     /** Account rule → global rule → shipped dictionary (ADR-001). */
@@ -312,13 +420,33 @@ class TransactionLedger @Inject constructor(
         return db.merchantRuleDao().lookup(accountId, key) ?: MerchantDictionary.categoryFor(key)
     }
 
-    /** Corrections teach every account by default (ADR-001, user decision). */
-    private suspend fun learn(merchantKey: String?, categoryId: Long?, now: Long) {
+    /**
+     * Corrections teach every account by default (ADR-001, user decision): the next payment to this merchant gets
+     * this category, and SMS rows of the same merchant still waiting for review take it now.
+     */
+    private suspend fun learn(merchantKey: String?, categoryId: Long?, now: Long, exceptId: Long = 0) {
         if (merchantKey == null || categoryId == null || categoryId < 10) return // never learn system categories
         db.merchantRuleDao().upsert(MerchantRuleEntity(MerchantRuleEntity.GLOBAL_ACCOUNT, merchantKey, categoryId, now))
+        val kinds = when (db.categoryDao().getById(categoryId)?.kind) {
+            com.spendwise.app.data.db.entity.CategoryKind.EXPENSE -> listOf(TxnKind.EXPENSE, TxnKind.FEE)
+            com.spendwise.app.data.db.entity.CategoryKind.INCOME -> listOf(TxnKind.INCOME)
+            else -> return
+        }
+        txnDao.categorisePendingFor(merchantKey, categoryId, kinds, exceptId)
+    }
+
+    private fun transferKinds(from: AccountType, to: AccountType): Triple<TxnKind, TxnKind, PaymentMethod> = when {
+        to == AccountType.CASH && from != AccountType.CASH -> Triple(TxnKind.ATM_WITHDRAWAL, TxnKind.TRANSFER_IN, PaymentMethod.ATM)
+        from == AccountType.CASH && to != AccountType.CASH -> Triple(TxnKind.TRANSFER_OUT, TxnKind.CASH_DEPOSIT, PaymentMethod.CASH)
+        else -> Triple(TxnKind.TRANSFER_OUT, TxnKind.TRANSFER_IN, PaymentMethod.UNKNOWN)
     }
 
     private companion object {
+        const val PAIR_WINDOW_MS = 10 * 60_000L
+        val PAIRABLE = setOf(
+            TxnKind.EXPENSE, TxnKind.INCOME, TxnKind.UNKNOWN, TxnKind.TRANSFER_OUT, TxnKind.TRANSFER_IN,
+            TxnKind.ATM_WITHDRAWAL, TxnKind.CASH_DEPOSIT,
+        )
         val ENTRY_KINDS = setOf(TxnKind.EXPENSE, TxnKind.INCOME, TxnKind.FEE, TxnKind.INTEREST)
         val SPLITTABLE = setOf(TxnKind.EXPENSE, TxnKind.INCOME, TxnKind.FEE)
     }

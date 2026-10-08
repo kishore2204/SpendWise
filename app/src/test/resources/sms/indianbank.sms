@@ -1,0 +1,111 @@
+id: ib-upi-debit-1
+origin: real
+sender: VM-INDBNK-S
+sentAt: 2026-10-07T10:43
+expect: PARSED
+template: indianbank.upi.debit
+amount: 2300
+direction: OUT
+kind: EXPENSE
+last4: 0000
+merchant: CUMTA
+ref: 600000000001
+balance: 284444
+date: 2026-10-07
+confidence: HIGH
+---
+Sent Rs.23.00 from A/c *0000 on 07-10-26 to CUMTA.RRN 600000000001.Avl Bal Rs.2844.44.Not you?SMS BLOCK to 9289592895-Indian Bank
+===
+id: ib-upi-debit-person-initial
+origin: real
+sender: VM-INDBNK-S
+sentAt: 2026-10-07T12:52
+expect: PARSED
+template: indianbank.upi.debit
+amount: 10000
+last4: 0000
+merchant: Mr Ravi K
+ref: 600000000002
+balance: 274444
+confidence: HIGH
+---
+Sent Rs.100.00 from A/c *0000 on 07-10-26 to Mr Ravi K.RRN 600000000002.Avl Bal Rs.2744.44.Not you?SMS BLOCK to 9289592895-Indian Bank
+===
+id: ib-upi-debit-3
+origin: real
+sender: VM-INDBNK-S
+sentAt: 2026-10-07T13:30
+expect: PARSED
+template: indianbank.upi.debit
+amount: 2000
+merchant: Mr Ravi K
+ref: 600000000003
+balance: 272444
+---
+Sent Rs.20.00 from A/c *0000 on 07-10-26 to Mr Ravi K.RRN 600000000003.Avl Bal Rs.2724.44.Not you?SMS BLOCK to 9289592895-Indian Bank
+===
+id: ib-upi-debit-hungerbox
+origin: real
+sender: VM-INDBNK-S
+sentAt: 2026-10-07T14:47
+expect: PARSED
+template: indianbank.upi.debit
+amount: 12100
+merchant: HungerBox
+ref: 600000000004
+balance: 260344
+---
+Sent Rs.121.00 from A/c *0000 on 07-10-26 to HungerBox.RRN 600000000004.Avl Bal Rs.2603.44.Not you?SMS BLOCK to 9289592895-Indian Bank
+===
+id: ib-upi-debit-5
+origin: real
+sender: VM-INDBNK-S
+sentAt: 2026-10-07T16:06
+expect: PARSED
+template: indianbank.upi.debit
+amount: 1500
+merchant: CUMTA
+ref: 600000000005
+balance: 258844
+---
+Sent Rs.15.00 from A/c *0000 on 07-10-26 to CUMTA.RRN 600000000005.Avl Bal Rs.2588.44.Not you?SMS BLOCK to 9289592895-Indian Bank
+===
+id: ib-upi-debit-store
+origin: real
+sender: VM-INDBNK-S
+sentAt: 2026-10-07T16:24
+expect: PARSED
+template: indianbank.upi.debit
+amount: 2000
+merchant: Lakshmi Store
+ref: 600000000006
+balance: 256844
+---
+Sent Rs.20.00 from A/c *0000 on 07-10-26 to Lakshmi Store.RRN 600000000006.Avl Bal Rs.2568.44.Not you?SMS BLOCK to 9289592895-Indian Bank
+===
+id: ib-credit
+origin: synthetic
+sender: JD-INDBNK-S
+sentAt: 2026-10-07T18:00
+expect: PARSED
+template: indianbank.credit
+amount: 50000
+direction: IN
+kind: INCOME
+last4: 0000
+ref: 600000000007
+balance: 306844
+confidence: NEEDS_REVIEW
+---
+Rs.500.00 credited to A/c *0000 on 07-10-26 by Mr Ravi K. RRN 600000000007. Avl Bal Rs.3068.44-Indian Bank
+===
+id: ib-big-amount-commas
+origin: synthetic
+sender: VM-INDBNK-S
+sentAt: 2026-10-07T19:00
+expect: PARSED
+template: indianbank.upi.debit
+amount: 12345678
+balance: 100
+---
+Sent Rs.1,23,456.78 from A/c *0000 on 07-10-26 to Big Shop.RRN 600000000008.Avl Bal Rs.1.00.Not you?SMS BLOCK to 9289592895-Indian Bank

@@ -41,6 +41,10 @@ import com.spendwise.app.feature.transactions.TransactionsScreen
 import com.spendwise.app.feature.home.HomeScreen
 import com.spendwise.app.feature.insights.InsightsScreen
 import com.spendwise.app.feature.settings.MoreScreen
+import com.spendwise.app.feature.sms.ReviewScreen
+import com.spendwise.app.feature.sms.SmsSetupScreen
+import com.spendwise.app.feature.sms.UnreadableScreen
+import androidx.compose.runtime.LaunchedEffect
 import com.spendwise.app.ui.components.BottomBarItem
 import com.spendwise.app.ui.components.GlassTopBar
 import com.spendwise.app.ui.components.LiquidTabBar
@@ -57,7 +61,10 @@ import kotlinx.serialization.Serializable
 @Serializable data class AddTransactionRoute(val editId: Long? = null) : NavKey
 @Serializable data object TransactionsRoute : NavKey
 @Serializable data class TransactionDetailRoute(val txnId: Long) : NavKey
-@Serializable data object AddAccountRoute : NavKey
+@Serializable data class AddAccountRoute(val bankCode: String? = null, val last4: String? = null) : NavKey
+@Serializable data object ReviewRoute : NavKey
+@Serializable data object SmsSetupRoute : NavKey
+@Serializable data object UnreadableRoute : NavKey
 @Serializable data class AccountDetailRoute(val accountId: Long) : NavKey
 
 private val TopLevelItems = listOf(
@@ -81,6 +88,21 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
     val currentTab = backStack.firstOrNull() ?: HomeRoute
     val showBar = top in TopLevelItems.map { it.key }
     val motion = SpendWise.motion
+
+    // A tapped notification: open the transaction (or the review list) on top of Home.
+    val link by AppLinks.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(link) {
+        val l = link ?: return@LaunchedEffect
+        AppLinks.consume()
+        backStack.switchTab(HomeRoute)
+        when (l) {
+            is AppLink.Review -> {
+                appViewModel.select(l.accountId)
+                backStack.add(ReviewRoute)
+            }
+            is AppLink.Transaction -> backStack.add(TransactionDetailRoute(l.txnId))
+        }
+    }
 
     GlassScaffold(
         reduceTransparency = reduceTransparency,
@@ -128,20 +150,25 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
                 entryProvider = entryProvider {
                     entry<HomeRoute> {
                         HomeScreen(
-                            onAddAccount = { backStack.add(AddAccountRoute) },
+                            onAddAccount = { backStack.add(AddAccountRoute()) },
                             onManageAccounts = { backStack.switchTab(AccountsRoute) },
                             onSeeAll = { backStack.add(TransactionsRoute) },
                             onOpenTransaction = { backStack.add(TransactionDetailRoute(it)) },
+                            onReview = { backStack.add(ReviewRoute) },
+                            onSmsSetup = { backStack.add(SmsSetupRoute) },
+                            onAddDetected = { bank, last4 -> backStack.add(AddAccountRoute(bank, last4)) },
                         )
                     }
                     entry<AccountsRoute> {
                         AccountsScreen(
-                            onAddAccount = { backStack.add(AddAccountRoute) },
+                            onAddAccount = { backStack.add(AddAccountRoute()) },
                             onOpenAccount = { backStack.add(AccountDetailRoute(it)) },
                         )
                     }
-                    entry<AddAccountRoute> {
+                    entry<AddAccountRoute> { key ->
                         AddAccountScreen(
+                            prefillBankCode = key.bankCode,
+                            prefillLast4 = key.last4,
                             onClose = { backStack.removeLastOrNull() },
                             onCreated = { id ->
                                 backStack.removeLastOrNull()
@@ -153,7 +180,19 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
                         AccountDetailScreen(accountId = key.accountId, onClose = { backStack.removeLastOrNull() })
                     }
                     entry<InsightsRoute> { InsightsScreen() }
-                    entry<MoreRoute> { MoreScreen() }
+                    entry<MoreRoute> {
+                        MoreScreen(
+                            onSmsSetup = { backStack.add(SmsSetupRoute) },
+                            onUnreadable = { backStack.add(UnreadableRoute) },
+                        )
+                    }
+                    entry<ReviewRoute> {
+                        ReviewScreen(onClose = { backStack.removeLastOrNull() }, onOpen = { backStack.add(TransactionDetailRoute(it)) })
+                    }
+                    entry<SmsSetupRoute> { SmsSetupScreen(onClose = { backStack.removeLastOrNull() }) }
+                    entry<UnreadableRoute> {
+                        UnreadableScreen(onClose = { backStack.removeLastOrNull() }, onAddManually = { backStack.add(AddTransactionRoute()) })
+                    }
                     entry<AddTransactionRoute> { key ->
                         AddTransactionScreen(onClose = { backStack.removeLastOrNull() }, editId = key.editId)
                     }

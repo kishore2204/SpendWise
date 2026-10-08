@@ -4,8 +4,13 @@
 
     <!--
         Deliberately NO android.permission.INTERNET (ADR-005 §10): the app cannot send data anywhere.
-        SMS / notification permissions are added in Phase 5.
     -->
+
+    <!-- Phase 5 (ADR-005): event-driven SMS, inbox read only on pull-to-refresh / the user's import. -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:name=".SpendWiseApp"
@@ -23,6 +28,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:configChanges="uiMode|orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -30,6 +36,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Only the system's SMS service can deliver here (BROADCAST_SMS is a signature permission). -->
+        <receiver
+            android:name=".transaction.sms.SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Notification Confirm / Ignore. Reached only through our own PendingIntents. -->
+        <receiver
+            android:name=".transaction.sms.NotificationActionReceiver"
+            android:exported="false" />
 
         <!-- WorkManager is initialized on demand through Hilt's WorkerFactory. -->
         <provider

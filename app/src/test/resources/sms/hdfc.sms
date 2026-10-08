@@ -1,0 +1,177 @@
+id: hdfc-upi-debit-person
+origin: real
+sender: AD-HDFCBK-T
+sentAt: 2026-09-28T19:22
+expect: PARSED
+template: hdfc.upi.debit
+amount: 35000
+direction: OUT
+kind: EXPENSE
+last4: 1111
+merchant: Mr A Kumar
+ref: 600000000101
+date: 2026-09-28
+confidence: HIGH
+---
+Sent Rs.350.00
+From HDFC Bank A/C *1111
+To Mr A Kumar
+On 28/09/26
+Ref 600000000101
+Not You?
+Call 18002586161/SMS BLOCK UPI to 7308080808
+===
+id: hdfc-upi-debit-truncated-merchant
+origin: real
+sender: AD-HDFCBK-T
+sentAt: 2026-10-02T16:11
+expect: PARSED
+template: hdfc.upi.debit
+amount: 464000
+last4: 1111
+merchant: ANANTHAM RETAIL PRIVATE L
+ref: 600000000102
+date: 2026-10-02
+confidence: HIGH
+---
+Sent Rs.4640.00
+From HDFC Bank A/C *1111
+To ANANTHAM RETAIL PRIVATE L
+On 02/10/26
+Ref 600000000102
+Not You?
+Call 18002586161/SMS BLOCK UPI to 7308080808
+===
+id: hdfc-otp
+origin: real
+sender: AD-HDFCBK-T
+sentAt: 2026-07-12T19:11
+expect: NOT_TRANSACTION
+reject: OTP
+---
+000000 is your OTP for service - Login request on HDFC Bank MyCards. Valid for 2 mins. Never share OTP @mycards.hdfc.bank.in #000000
+===
+id: hdfc-upi-credit
+origin: synthetic
+sender: VK-HDFCBK-S
+sentAt: 2026-10-07T09:00
+expect: PARSED
+template: hdfc.upi.credit
+amount: 50000
+direction: IN
+kind: INCOME
+last4: 1111
+merchant: ravi@okaxis
+ref: 600000000201
+confidence: NEEDS_REVIEW
+---
+Rs.500.00 credited to HDFC Bank A/c XX1111 on 07-10-26 from VPA ravi@okaxis (UPI 600000000201)
+===
+id: hdfc-card-spend
+origin: synthetic
+sender: AX-HDFCBK-S
+sentAt: 2026-10-07T14:32
+expect: PARSED
+template: hdfc.card.spend
+amount: 125000
+direction: OUT
+kind: EXPENSE
+merchant: AMAZON
+date: 2026-10-07
+---
+Spent Rs.1,250.00 On HDFC Bank Card 9999 At AMAZON On 2026-10-07:14:32:10 Not You? To Block+Reissue Call 18002586161/SMS BLOCK CC 9999 to 7308080808
+===
+id: hdfc-atm
+origin: synthetic
+sender: AD-HDFCBK-S
+sentAt: 2026-10-07T11:00
+expect: PARSED
+template: hdfc.atm
+amount: 500000
+kind: ATM_WITHDRAWAL
+last4: 1111
+---
+Rs.5000.00 withdrawn from HDFC Bank A/c XX1111 on 07-10-26 at ATM CHENNAI. Avl bal: Rs.20000.00
+===
+id: hdfc-reminder
+origin: synthetic
+sender: AD-HDFCBK-S
+sentAt: 2026-10-07T11:00
+expect: NOT_TRANSACTION
+reject: MANDATE_REMINDER
+---
+Rs.499.00 will be debited from your HDFC Bank A/c XX1111 on 10-10-26 towards NETFLIX mandate.
+===
+id: hdfc-failed
+origin: synthetic
+sender: AD-HDFCBK-S
+sentAt: 2026-10-07T11:00
+expect: NOT_TRANSACTION
+reject: FAILED
+---
+Your UPI transaction of Rs.200.00 from HDFC Bank A/c XX1111 has failed. Amount if debited will be reversed.
+===
+id: hdfc-promo
+origin: synthetic
+sender: AD-HDFCBK-P
+sentAt: 2026-10-07T11:00
+expect: NOT_TRANSACTION
+reject: PROMO
+---
+Congratulations! You are pre-approved for a Personal Loan up to Rs.5,00,000. Apply now.
+===
+id: hdfc-new-wording-falls-back
+origin: synthetic
+sender: AD-HDFCBK-S
+sentAt: 2026-10-07T11:00
+expect: PARSED
+parser: generic
+amount: 99900
+direction: OUT
+last4: 1111
+confidence: NEEDS_REVIEW
+---
+UPDATE: INR 999.00 debited from A/c XX1111 to SPOTIFY on 07-10-26. Ref 600000000301.
+===
+id: hdfc-credit-card-spend
+origin: synthetic
+sender: AX-HDFCBK-S
+sentAt: 2026-10-07T15:10
+expect: PARSED
+template: hdfc.card.spend
+amount: 80000
+direction: OUT
+kind: EXPENSE
+last4: 4321
+merchant: CROMA
+date: 2026-10-07
+confidence: NEEDS_REVIEW
+---
+Spent Rs.800.00 On HDFC Bank Credit Card 4321 At CROMA On 2026-10-07:15:09:41 Not You? To Block+Reissue Call 18002586161/SMS BLOCK CC 4321 to 7308080808
+===
+id: hdfc-reversal
+origin: synthetic
+sender: AD-HDFCBK-S
+sentAt: 2026-10-07T16:00
+expect: PARSED
+parser: generic
+amount: 50000
+direction: IN
+kind: REVERSAL
+last4: 1111
+confidence: NEEDS_REVIEW
+---
+Rs.500.00 debited from A/c XX1111 on 05-10-26 has been reversed. Ref 600000000301
+===
+id: hdfc-treatment-is-not-atm
+origin: synthetic
+sender: AD-HDFCBK-S
+sentAt: 2026-10-07T17:00
+expect: PARSED
+parser: generic
+amount: 150000
+direction: OUT
+kind: EXPENSE
+last4: 1111
+---
+Rs.1,500.00 debited from A/c XX1111 on 07-10-26 at DENTAL TREATMENT CLINIC. Ref 600000000302

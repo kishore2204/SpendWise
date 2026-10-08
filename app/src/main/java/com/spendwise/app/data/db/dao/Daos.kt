@@ -43,6 +43,17 @@ interface AccountDao {
     @Query("UPDATE account SET archivedAt = :at WHERE id = :accountId")
     suspend fun archive(accountId: Long, at: Long)
 
+    /** Accounts are identified by (bank, accountIdentifier) — CLAUDE.md. */
+    @Query("SELECT * FROM account WHERE bankCode = :bankCode AND last4 = :last4")
+    suspend fun findByIdentifier(bankCode: String, last4: String): AccountEntity?
+
+    @Query("SELECT * FROM account WHERE bankCode = :bankCode AND archivedAt IS NULL")
+    suspend fun activeForBank(bankCode: String): List<AccountEntity>
+
+    /** The Cash wallet, the destination of an ATM withdrawal (bank → Cash transfer). */
+    @Query("SELECT * FROM account WHERE type = 'CASH' AND archivedAt IS NULL ORDER BY createdAt, id LIMIT 1")
+    suspend fun cashWallet(): AccountEntity?
+
     /**
      * Every active account with ITS OWN balance (ADR-004 anchors), for the account list and switcher.
      * Each balance is a correlated subquery on `acc.id` — balances are never summed across accounts.
@@ -223,6 +234,13 @@ interface TxnDao {
     @Query("SELECT COUNT(*) FROM txn WHERE refundOfId = :originalId")
     suspend fun refundCount(originalId: Long): Int
 
+    /**
+     * After the user teaches "merchant → category", pending SMS rows of that merchant (any account — category labels
+     * are global, ADR-001) take it too. Confirmed history is never rewritten.
+     */
+    @Query("UPDATE txn SET categoryId = :categoryId WHERE status = 'PENDING' AND merchantKey = :merchantKey AND kind IN (:kinds) AND id != :exceptId")
+    suspend fun categorisePendingFor(merchantKey: String, categoryId: Long, kinds: List<com.spendwise.app.data.db.entity.TxnKind>, exceptId: Long)
+
     /** Refunds net against their original's category (ADR-004), so they follow it when it changes. */
     @Query("UPDATE txn SET categoryId = :categoryId WHERE refundOfId = :originalId")
     suspend fun setRefundsCategory(originalId: Long, categoryId: Long?)
@@ -256,7 +274,7 @@ interface TxnDao {
         /** Row for lists. The counterparty is the OTHER leg's account NAME only — never its money (isolation). */
         const val LIST_SELECT = """
             SELECT t.id, t.accountId, t.amountPaise, t.kind, t.status, t.confidence, t.occurredAt, t.merchantRaw, t.note,
-                   t.categoryId, c.name AS categoryName, c.iconKey AS categoryIcon, t.paymentMethod, t.refundOfId,
+                   t.categoryId, c.name AS categoryName, c.iconKey AS categoryIcon, t.paymentMethod, t.refundOfId, t.possibleDupOfId,
                    (SELECT a.nickname FROM transfer tr
                       JOIN txn o ON o.id = CASE WHEN tr.fromTxnId = t.id THEN tr.toTxnId ELSE tr.fromTxnId END
                       JOIN account a ON a.id = o.accountId
@@ -282,6 +300,8 @@ data class TxnRow(
     val categoryIcon: String?,
     val paymentMethod: com.spendwise.app.data.db.entity.PaymentMethod,
     val refundOfId: Long?,
+    /** Set when an SMS may repeat an existing transaction (ADR-004 fuzzy dedup) — the user decides. */
+    val possibleDupOfId: Long?,
     val counterpartyAccount: String?,
     val hasSplits: Boolean,
 )
