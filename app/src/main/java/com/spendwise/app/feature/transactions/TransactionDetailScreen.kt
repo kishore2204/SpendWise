@@ -101,6 +101,8 @@ data class TxnDetailState(
     val pairSuggestions: List<PairSuggestion> = emptyList(),
     /** The SMS landed shortly after a balance the user entered — it may already be included (ADR-004 latency). */
     val nearAnchor: Boolean = false,
+    /** For an unlinked refund/reversal: purchases it may pay back. */
+    val refundOf: List<com.spendwise.app.data.db.entity.TxnEntity> = emptyList(),
     /** Friends' parts of this bill (ADR-011). */
     val shares: List<com.spendwise.app.data.db.dao.ShareRow> = emptyList(),
     /** The bank SMS this transaction came from (empty for manual entries). */
@@ -166,7 +168,13 @@ class TransactionDetailViewModel @AssistedInject constructor(
         val nearAnchor = pending && entity != null && db.ledgerDao().latestAnchor(r.accountId)?.let { a ->
             IngestProcessor.anchorMayCover(a.effectiveAt, entity.occurredAt, entity.timeSource, entity.createdAt)
         } == true
-        st.copy(refundable = refundable, pairSuggestions = suggestions, nearAnchor = nearAnchor, sources = db.rawMessageDao().sourcesFor(r.id))
+        st.copy(
+            refundable = refundable,
+            pairSuggestions = suggestions,
+            nearAnchor = nearAnchor,
+            sources = db.rawMessageDao().sourcesFor(r.id),
+            refundOf = ledger.refundSuggestions(r.id),
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TxnDetailState())
 
     /** Guards against a double tap creating two refunds (each would fit under the cap on its own). */
@@ -222,6 +230,8 @@ class TransactionDetailViewModel @AssistedInject constructor(
             is LedgerResult.Rejected -> onResult(null, res.reason)
         }
     }
+
+    fun linkRefund(originalId: Long) = run({ ledger.linkRefund(txnId, originalId) }, {})
 
     fun removeShare(shareId: Long) = run({ shared.removeShare(shareId) }, {})
     fun forgive(shareId: Long) = run({ shared.forgive(shareId) }, {})
@@ -328,6 +338,22 @@ fun TransactionDetailScreen(
                                 onClick = { viewModel.pair(s.txnId) },
                             ) { Text("Pair", color = colors.primary, style = MaterialTheme.typography.labelLarge) }
                             if (i < state.pairSuggestions.lastIndex) HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
+                        }
+                    }
+                }
+            }
+            if (state.refundOf.isNotEmpty()) {
+                item(key = "refund-of-label") { SectionLabel("Money back for which purchase?") }
+                item(key = "refund-of") {
+                    GroupCard {
+                        state.refundOf.forEachIndexed { i, o ->
+                            ListRow(
+                                title = "${o.merchantRaw?.let(com.spendwise.app.core.merchant.Merchants::display) ?: "A purchase"} · ${Money.format(-o.amountPaise)}",
+                                subtitle = TxnText.day(IndiaTime.localDate(o.occurredAt), IndiaTime.localDate(System.currentTimeMillis())) + " · nets it in that category",
+                                leadingIcon = Icons.AutoMirrored.Rounded.Undo,
+                                onClick = { viewModel.linkRefund(o.id) },
+                            ) { Text("Link", color = colors.primary, style = MaterialTheme.typography.labelLarge) }
+                            if (i < state.refundOf.lastIndex) HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
                         }
                     }
                 }

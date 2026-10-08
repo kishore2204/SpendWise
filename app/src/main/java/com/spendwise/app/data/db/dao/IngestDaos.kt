@@ -125,6 +125,17 @@ interface ReviewDao {
     @Query(TxnDao.LIST_SELECT + " WHERE t.accountId = :accountId AND t.status = 'PENDING' ORDER BY t.occurredAt DESC, t.id DESC")
     fun observePending(accountId: Long): Flow<List<TxnRow>>
 
+    /** Purchases in ONE account that a refund of [refundPaise] could belong to: recent, big enough, same merchant first. */
+    @Query(
+        """
+        SELECT * FROM txn WHERE accountId = :accountId AND kind IN ('EXPENSE','FEE') AND status = 'CONFIRMED'
+          AND -amountPaise >= :refundPaise AND occurredAt BETWEEN :from AND :to
+        ORDER BY CASE WHEN merchantKey = :merchantKey THEN 0 ELSE 1 END, CASE WHEN -amountPaise = :refundPaise THEN 0 ELSE 1 END, occurredAt DESC
+        LIMIT 6
+        """,
+    )
+    suspend fun refundCandidates(accountId: Long, refundPaise: Long, merchantKey: String?, from: Long, to: Long): List<TxnEntity>
+
     /** "Confirm all high-confidence" — never possible duplicates. */
     @Query("SELECT id FROM txn WHERE accountId = :accountId AND status = 'PENDING' AND confidence = 'HIGH' AND possibleDupOfId IS NULL")
     suspend fun pendingHighIds(accountId: Long): List<Long>

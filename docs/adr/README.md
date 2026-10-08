@@ -14,7 +14,7 @@ Each major decision is made through `/council` and recorded here. A superseded A
 | [008](ADR-008-liquid-glass.md) | iOS-style liquid glass: Kyant backdrop, aurora, two backdrops, liquid tab bar with droplet | Revised by 009 |
 | [009](ADR-009-calm-glass-and-palette.md) | Calm glass: neutral background, minimal 3-hue palette (solid cards revised by 010) | Accepted |
 | [010](ADR-010-guilloche-pattern.md) | Monochrome guilloché pattern behind glass; cards glass again; pattern cached as bitmap | Accepted (user decision) |
-| [011](ADR-011-shared-expenses.md) | Shared expenses: friend shares + settlements + `REPAYMENT` kind; own spending excludes shares | Accepted (total-per-friend open) |
+| [011](ADR-011-shared-expenses.md) | Shared expenses: friend shares + settlements + `REPAYMENT` kind; own spending excludes shares | Accepted (per account only — user decision) |
 
 ## Planned councils
 - Final product & engineering review (Phase 10)

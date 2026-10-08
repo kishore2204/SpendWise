@@ -1,5 +1,5 @@
 # ADR-011: Shared expenses — "I paid for a friend, they pay me back"
-- Status: Accepted (one presentation choice awaits the user — see "Open question")
+- Status: Accepted
 - Date: 2026-10-08
 - Council: Android Architect, Security & Data Engineer, Product / UX Architect, Android SMS Platform Engineer + Devil's Advocate, Simplicity Champion
 
@@ -50,7 +50,7 @@ The user often pays a whole bill for themself and a friend (₹30: ₹15 theirs,
 - A bill with shares can't be deleted or edited below Σ shares + refunds; refunds are capped by the same sum.
 - Suggestions only, never automatic: a credit gets "Paid back by Ravi?" when its payer matches a learned alias, or its amount equals one open share or a friend's oldest open shares. A transfer suggestion (shared RRN) ranks above it. Such credits are never HIGH confidence, so "Confirm all" and the notification Confirm can't book them as income.
 - Every Phase 6 analytics query takes own spending from the same rule (`LedgerDao` period summary and later category/trend queries subtract shares through `v_share_excluded`).
-- Shares reduce the bill's own category (its largest split part when split).
+- Shares reduce the bill's own category; on a split bill, every part in proportion (exact in paise).
 - **Account isolation:** outstanding is shown **per friend, per paying account** ("Ravi · ₹15 from HDFC · ₹40 from Indian"). No total across accounts — see the open question.
 - DB version 1 → 2 by Room AutoMigration (new tables + view only); the kind is stored by name, so no column changes; the sign trigger picks REPAYMENT up on the next open.
 
@@ -64,8 +64,8 @@ The user often pays a whole bill for themself and a friend (₹30: ₹15 theirs,
 ## Deferred
 "A friend paid for me" (the reverse direction), groups, reminders, choosing exactly which bills a repayment covers (V1: oldest first), overpayment allocation.
 
-## Open question (user preference)
-Should the Friends screen also show one **total per friend across accounts** ("Ravi owes you ₹55")? It is a debt owed by a person, not money in an account, but it is a cross-account sum, which rule #1 forbids today. Default: per-account lines only, until the user decides.
+## User decision (2026-10-08)
+Asked whether the Friends screen should also show one total per friend across accounts ("Ravi owes you ₹55"): **no — keep it per account** ("₹15 from HDFC · ₹40 from Indian"). Rule #1 stays without exception.
 
 ## Revisit if
 - Repayments are often split across bills in a way "oldest first" gets wrong → add manual allocation.

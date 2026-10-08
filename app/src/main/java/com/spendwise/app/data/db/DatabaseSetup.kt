@@ -14,6 +14,8 @@ object DatabaseSetup {
     const val CATEGORY_REFUND = 2L
     const val CATEGORY_ADJUSTMENT = 3L
     const val CATEGORY_REPAYMENT = 4L
+    /** Budget target for "all spending" of an account (a system label; never on a transaction). */
+    const val CATEGORY_ALL_SPENDING = 5L
 
     private fun kinds(predicate: (TxnKind) -> Boolean) =
         TxnKind.entries.filter(predicate).joinToString(",") { "'${it.name}'" }
@@ -160,6 +162,7 @@ object DatabaseSetup {
         SeedCategory(CATEGORY_REFUND, "Refund", "SYSTEM", "undo", 1, system = true),
         SeedCategory(CATEGORY_ADJUSTMENT, "Adjustment", "SYSTEM", "tune", 2, system = true),
         SeedCategory(CATEGORY_REPAYMENT, "Paid back", "SYSTEM", "handshake", 3, system = true),
+        SeedCategory(CATEGORY_ALL_SPENDING, "All spending", "SYSTEM", "account_balance_wallet", 4, system = true),
         SeedCategory(10, "Food & Dining", "EXPENSE", "restaurant", 3),
         SeedCategory(11, "Groceries", "EXPENSE", "local_grocery_store", 4),
         SeedCategory(12, "Shopping", "EXPENSE", "shopping_bag", 5),

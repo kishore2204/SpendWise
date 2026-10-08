@@ -61,6 +61,7 @@ abstract class SpendWiseDatabase : RoomDatabase() {
     abstract fun notMineDao(): com.spendwise.app.data.db.dao.NotMineDao
     abstract fun reviewDao(): com.spendwise.app.data.db.dao.ReviewDao
     abstract fun friendDao(): com.spendwise.app.data.db.dao.FriendDao
+    abstract fun analyticsDao(): com.spendwise.app.data.db.dao.AnalyticsDao
 
     companion object {
         const val NAME = "spendwise.db"

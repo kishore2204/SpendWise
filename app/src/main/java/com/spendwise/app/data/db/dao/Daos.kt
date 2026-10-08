@@ -220,6 +220,10 @@ interface CategoryDao {
     @Query("SELECT * FROM category ORDER BY sortOrder")
     suspend fun getAll(): List<CategoryEntity>
 
+    /** Every category incl. archived — names for analytics of older months. */
+    @Query("SELECT * FROM category")
+    fun observeAll(): Flow<List<CategoryEntity>>
+
     @Query("SELECT * FROM category WHERE name = :name COLLATE NOCASE LIMIT 1")
     suspend fun byName(name: String): CategoryEntity?
 

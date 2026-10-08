@@ -121,3 +121,8 @@ Keys are deterministic. They never use the SMS provider's `_id` or autoincrement
   - Changing the amount clears the splits, and the transaction falls back to the largest part's category, never "Uncategorised".
   - `txn_split` has no `accountId`. Any per-category analytics over splits MUST join `v_confirmed_txn` and filter on its `accountId`.
 - **Detail-screen writes** are guarded against double submission.
+
+## Phase 6 analytics notes (2026-10-08)
+- Analytics are computed by one pure engine (`domain/analytics/Analytics.kt`) over ONE account's confirmed rows and are unit-tested to equal `LedgerDao.observePeriodSummary` exactly.
+- Split purchases: spending, friends' shares (ADR-011) and **refunds** are spread over the split parts in proportion (exact in paise, remainder to the largest part). The refund row's stored category (largest part) is only for display.
+- SMS refunds/reversals arrive unlinked; the detail screen offers "Money back for which purchase?" (`TransactionLedger.linkRefund`): same account, capped by refunds + shares, turns a reversal into a linked REFUND.

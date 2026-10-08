@@ -1,5 +1,6 @@
 package com.spendwise.app.ui.components
 
+import androidx.compose.material.icons.rounded.AccountBalanceWallet
 import androidx.compose.material.icons.automirrored.rounded.Label
 import androidx.compose.material.icons.rounded.Handshake
 import androidx.compose.material.icons.rounded.Checkroom
@@ -107,6 +108,7 @@ object CategoryIcons {
         "tune" -> Icons.Rounded.Tune
         "handshake" -> Icons.Rounded.Handshake
         "label" -> Icons.AutoMirrored.Rounded.Label
+        "account_balance_wallet" -> Icons.Rounded.AccountBalanceWallet
         "checkroom" -> Icons.Rounded.Checkroom
         "directions_walk" -> Icons.AutoMirrored.Rounded.DirectionsWalk
         "devices" -> Icons.Rounded.Devices

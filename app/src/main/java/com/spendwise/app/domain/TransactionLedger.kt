@@ -264,6 +264,39 @@ class TransactionLedger @Inject constructor(
         }
     }
 
+    /** Purchases a refund/reversal (money back) may belong to — same account, recent, merchant/amount first. */
+    suspend fun refundSuggestions(txnId: Long): List<TxnEntity> {
+        val t = txnDao.getById(txnId) ?: return emptyList()
+        if (t.amountPaise <= 0 || t.refundOfId != null || (t.kind != TxnKind.REFUND && t.kind != TxnKind.REVERSAL)) return emptyList()
+        return db.reviewDao().refundCandidates(t.accountId, t.amountPaise, t.merchantKey, t.occurredAt - REFUND_LOOKBACK_MS, t.occurredAt)
+            .filter { it.id != t.id }
+    }
+
+    /**
+     * Links money that came back (an SMS refund or reversal) to the purchase it pays back, so analytics net it against
+     * that purchase's category. Same account only; capped by refunds + friends' shares like any refund.
+     */
+    suspend fun linkRefund(refundId: Long, originalId: Long): LedgerResult = db.withTransaction {
+        val r = txnDao.getById(refundId) ?: return@withTransaction LedgerResult.Rejected("Transaction not found")
+        val o = txnDao.getById(originalId) ?: return@withTransaction LedgerResult.Rejected("Purchase not found")
+        val problem = when {
+            r.amountPaise <= 0 || (r.kind != TxnKind.REFUND && r.kind != TxnKind.REVERSAL) -> "Only money coming back can be a refund"
+            r.refundOfId != null -> "Already linked"
+            r.accountId != o.accountId -> "The purchase must be in the same account"
+            o.kind != TxnKind.EXPENSE && o.kind != TxnKind.FEE -> "Only spending can be refunded"
+            o.status != TxnStatus.CONFIRMED -> "Confirm the purchase first"
+            txnDao.transferFor(r.id) != null -> "This is a transfer"
+            else -> null
+        }
+        if (problem != null) return@withTransaction LedgerResult.Rejected(problem)
+        val remaining = abs(o.amountPaise) - txnDao.refundedSoFar(o.id) - db.friendDao().sharedOn(o.id)
+        if (r.amountPaise > remaining) return@withTransaction LedgerResult.Rejected("At most ${Money.format(remaining.coerceAtLeast(0))} of that purchase can still be refunded")
+        val category = o.categoryId ?: txnDao.getSplits(o.id).maxByOrNull { abs(it.amountPaise) }?.categoryId
+        txnDao.clearSplits(r.id)
+        txnDao.update(r.copy(kind = TxnKind.REFUND, refundOfId = o.id, categoryId = category, merchantRaw = r.merchantRaw ?: o.merchantRaw, merchantKey = r.merchantKey ?: o.merchantKey, updatedAt = clock.now()))
+        LedgerResult.Ok(r.id)
+    }
+
     // ---------------------------------------------------------------- splits
 
     /** Replaces a transaction's splits. Parts must add up EXACTLY to the transaction, in paise. */
@@ -486,6 +519,7 @@ class TransactionLedger @Inject constructor(
 
     private companion object {
         const val PAIR_WINDOW_MS = 10 * 60_000L
+        const val REFUND_LOOKBACK_MS = 120L * 24 * 3_600_000
         val PAIRABLE = setOf(
             TxnKind.EXPENSE, TxnKind.INCOME, TxnKind.UNKNOWN, TxnKind.TRANSFER_OUT, TxnKind.TRANSFER_IN,
             TxnKind.ATM_WITHDRAWAL, TxnKind.CASH_DEPOSIT,
