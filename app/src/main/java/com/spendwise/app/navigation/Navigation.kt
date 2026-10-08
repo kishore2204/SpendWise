@@ -66,6 +66,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object SmsSetupRoute : NavKey
 @Serializable data object UnreadableRoute : NavKey
 @Serializable data object FriendsRoute : NavKey
+@Serializable data object SecurityRoute : NavKey
 @Serializable data class FriendRoute(val friendId: Long) : NavKey
 @Serializable data class AccountDetailRoute(val accountId: Long) : NavKey
 
@@ -187,8 +188,10 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
                             onSmsSetup = { backStack.add(SmsSetupRoute) },
                             onUnreadable = { backStack.add(UnreadableRoute) },
                             onFriends = { backStack.add(FriendsRoute) },
+                            onSecurity = { backStack.add(SecurityRoute) },
                         )
                     }
+                    entry<SecurityRoute> { com.spendwise.app.feature.settings.SecurityScreen(onClose = { backStack.removeLastOrNull() }) }
                     entry<FriendsRoute> {
                         com.spendwise.app.feature.friends.FriendsScreen(onClose = { backStack.removeLastOrNull() }, onOpenFriend = { backStack.add(FriendRoute(it)) })
                     }

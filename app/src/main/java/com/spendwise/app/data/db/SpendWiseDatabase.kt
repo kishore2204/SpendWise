@@ -62,6 +62,7 @@ abstract class SpendWiseDatabase : RoomDatabase() {
     abstract fun reviewDao(): com.spendwise.app.data.db.dao.ReviewDao
     abstract fun friendDao(): com.spendwise.app.data.db.dao.FriendDao
     abstract fun analyticsDao(): com.spendwise.app.data.db.dao.AnalyticsDao
+    abstract fun exportDao(): com.spendwise.app.security.ExportDao
 
     companion object {
         const val NAME = "spendwise.db"

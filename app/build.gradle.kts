@@ -132,6 +132,7 @@ dependencies {
     implementation(libs.backdrop)
     implementation(libs.kyant.shapes)
     implementation(libs.vico.compose.m3)
+    implementation(libs.biometric)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)

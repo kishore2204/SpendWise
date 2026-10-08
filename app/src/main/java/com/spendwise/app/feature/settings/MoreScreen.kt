@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.SmsFailed
 import androidx.compose.material3.AlertDialog
@@ -87,6 +88,7 @@ fun MoreScreen(
     onSmsSetup: () -> Unit,
     onUnreadable: () -> Unit,
     onFriends: () -> Unit,
+    onSecurity: () -> Unit,
     viewModel: MoreViewModel = hiltViewModel(),
 ) {
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
@@ -180,6 +182,18 @@ fun MoreScreen(
             }
         }
 
+        item(key = "security-label") { SectionLabel("Security") }
+        item(key = "security") {
+            GroupCard {
+                ListRow(
+                    title = "Security & backup",
+                    subtitle = "App lock, encrypted backup and restore, CSV export",
+                    leadingIcon = Icons.Rounded.Shield,
+                    onClick = onSecurity,
+                )
+            }
+        }
+
         item(key = "privacy-label") { SectionLabel("Privacy") }
         item(key = "privacy") {
             GroupCard {
@@ -191,7 +205,7 @@ fun MoreScreen(
                 HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
                 ListRow(
                     title = "Excluded from Android backup",
-                    subtitle = "Not copied by Google backup or Smart Switch. Encrypted backups are coming in a later update.",
+                    subtitle = "Not copied by Google backup or Smart Switch. Make your own encrypted backup in Security & backup.",
                     leadingIcon = Icons.Rounded.BackupTable,
                 )
                 HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
