@@ -98,17 +98,23 @@ class TransactionLedger @Inject constructor(
         return db.withTransaction {
             val t = txnDao.getById(txnId) ?: return@withTransaction LedgerResult.Rejected("Transaction not found")
             if (t.kind.isTransferFamily) return@withTransaction LedgerResult.Rejected("Edit transfers from the transfer itself")
+            if (t.kind == TxnKind.REPAYMENT) return@withTransaction LedgerResult.Rejected("Undo the repayment first, then edit it")
             val signed = signedFor(t.kind, amountPaise, fallbackNegative = t.amountPaise < 0)
             val isRefund = t.refundOfId != null
             if (isRefund) {
                 // A refund's cap is against its ORIGINAL, counting every other refund of it.
                 val original = txnDao.getById(t.refundOfId!!) ?: return@withTransaction LedgerResult.Rejected("Original purchase not found")
                 val others = txnDao.refundedSoFar(original.id) - abs(t.amountPaise)
-                val cap = abs(original.amountPaise) - others
+                // Friends' shares are part of the cap too (ADR-011).
+                val cap = abs(original.amountPaise) - others - db.friendDao().sharedOn(original.id)
                 if (amountPaise > cap) return@withTransaction LedgerResult.Rejected("At most ${Money.format(cap)} can be refunded")
             } else {
                 val refunded = txnDao.refundedSoFar(txnId)
                 if (refunded > amountPaise) return@withTransaction LedgerResult.Rejected("Already refunded ${Money.format(refunded)}; the amount can't be lower")
+                val shared = db.friendDao().sharedOn(txnId)
+                if (shared > 0 && shared + refunded > amountPaise) {
+                    return@withTransaction LedgerResult.Rejected("Friends' shares are ${Money.format(shared)}; the amount can't be lower")
+                }
             }
             val oldSplits = txnDao.getSplits(txnId)
             val amountChanged = signed != t.amountPaise
@@ -222,9 +228,12 @@ class TransactionLedger @Inject constructor(
             if (original.status != TxnStatus.CONFIRMED) {
                 return@withTransaction LedgerResult.Rejected("Confirm the purchase before adding a refund")
             }
-            val remaining = abs(original.amountPaise) - txnDao.refundedSoFar(originalId)
+            // Friends' shares (ADR-011) are part of the cap: a refund can't pay back money that a friend owes.
+            val remaining = abs(original.amountPaise) - txnDao.refundedSoFar(originalId) - db.friendDao().sharedOn(originalId)
             if (amountPaise > remaining) {
-                return@withTransaction LedgerResult.Rejected("At most ${Money.format(remaining)} can still be refunded")
+                return@withTransaction LedgerResult.Rejected(
+                    if (remaining <= 0) "Nothing left to refund — reduce the friends' shares first" else "At most ${Money.format(remaining)} can still be refunded",
+                )
             }
             // Refund nets against the original's category — or its largest split.
             val category = original.categoryId ?: txnDao.getSplits(originalId).maxByOrNull { abs(it.amountPaise) }?.categoryId
@@ -290,6 +299,7 @@ class TransactionLedger @Inject constructor(
     suspend fun delete(txnId: Long): LedgerResult = db.withTransaction {
         val t = txnDao.getById(txnId) ?: return@withTransaction LedgerResult.Rejected("Transaction not found")
         if (txnDao.refundCount(txnId) > 0) return@withTransaction LedgerResult.Rejected("Delete its refunds first")
+        if (db.friendDao().shareCount(txnId) > 0) return@withTransaction LedgerResult.Rejected("Remove the friends' shares first")
         val link = txnDao.transferFor(txnId)
         if (link != null) {
             txnDao.delete(link.fromTxnId)
@@ -309,14 +319,25 @@ class TransactionLedger @Inject constructor(
      */
     suspend fun confirm(txnId: Long, categoryId: Long? = null): LedgerResult = db.withTransaction { confirmInTransaction(txnId, categoryId) }
 
+    /**
+     * Confirm without opening it (notification button): refused when the money may be a friend paying back —
+     * the user must look first (ADR-011), so it is never booked as income by accident.
+     */
+    suspend fun confirmOneTap(txnId: Long): LedgerResult = db.withTransaction { confirmInTransaction(txnId, null, oneTap = true) }
+
     /** Confirms every HIGH-confidence pending row of ONE account that is not a possible duplicate. */
     suspend fun confirmAllHighConfidence(accountId: Long): Int = db.withTransaction {
-        db.reviewDao().pendingHighIds(accountId).count { confirmInTransaction(it, null) is LedgerResult.Ok }
+        db.reviewDao().pendingHighIds(accountId).count { confirmInTransaction(it, null, oneTap = true) is LedgerResult.Ok }
     }
 
-    private suspend fun confirmInTransaction(txnId: Long, categoryId: Long?): LedgerResult {
+    private suspend fun confirmInTransaction(txnId: Long, categoryId: Long?, oneTap: Boolean = false): LedgerResult {
         val t = txnDao.getById(txnId) ?: return LedgerResult.Rejected("Transaction not found")
         if (t.status != TxnStatus.PENDING) return LedgerResult.Rejected("Already reviewed")
+        if (oneTap && t.amountPaise > 0 && (t.kind == TxnKind.INCOME || t.kind == TxnKind.UNKNOWN) &&
+            (t.counterpartyKind == CounterpartyKind.PERSON || db.looksLikeRepayment(t.amountPaise, t.merchantRaw))
+        ) {
+            return LedgerResult.Rejected("Open it to check whether a friend paid you back")
+        }
         val cashMove = (t.kind == TxnKind.ATM_WITHDRAWAL || t.kind == TxnKind.CASH_DEPOSIT) && txnDao.transferFor(t.id) == null
         val cash = if (cashMove) db.accountDao().cashWallet()?.takeIf { it.id != t.accountId } else null
         // Bank ↔ Cash is a transfer with two legs; without a wallet it would be money that vanishes from analytics.
@@ -386,6 +407,7 @@ class TransactionLedger @Inject constructor(
             a.refundOfId != null || b.refundOfId != null || txnDao.refundCount(aId) > 0 || txnDao.refundCount(bId) > 0 ->
                 "Refunded transactions can't become a transfer"
             txnDao.transferFor(aId) != null || txnDao.transferFor(bId) != null -> "Already part of a transfer"
+            db.friendDao().shareCount(aId) > 0 || db.friendDao().shareCount(bId) > 0 -> "A bill shared with friends can't become a transfer"
             else -> null
         }
         if (problem != null) return@withTransaction LedgerResult.Rejected(problem)

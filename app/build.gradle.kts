@@ -71,6 +71,12 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
 
+    // Room's exported schemas (table definitions only, no data) for MigrationTestHelper under Robolectric, which reads
+    // the debug variant's merged assets. Never part of the release APK (ADR-004 migration tests).
+    sourceSets {
+        getByName("debug").assets.directories.add("$projectDir/schemas")
+    }
+
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }

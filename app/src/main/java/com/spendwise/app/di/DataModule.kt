@@ -42,6 +42,7 @@ object DataModule {
     @Provides fun merchantRuleDao(db: SpendWiseDatabase): com.spendwise.app.data.db.dao.MerchantRuleDao = db.merchantRuleDao()
     @Provides fun rawMessageDao(db: SpendWiseDatabase): com.spendwise.app.data.db.dao.RawMessageDao = db.rawMessageDao()
     @Provides fun reviewDao(db: SpendWiseDatabase): com.spendwise.app.data.db.dao.ReviewDao = db.reviewDao()
+    @Provides fun friendDao(db: SpendWiseDatabase): com.spendwise.app.data.db.dao.FriendDao = db.friendDao()
 
     @Provides
     @Singleton

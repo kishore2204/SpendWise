@@ -13,6 +13,7 @@ object DatabaseSetup {
     const val CATEGORY_TRANSFER = 1L
     const val CATEGORY_REFUND = 2L
     const val CATEGORY_ADJUSTMENT = 3L
+    const val CATEGORY_REPAYMENT = 4L
 
     private fun kinds(predicate: (TxnKind) -> Boolean) =
         TxnKind.entries.filter(predicate).joinToString(",") { "'${it.name}'" }
@@ -37,6 +38,12 @@ object DatabaseSetup {
                       AND o.kind IN ('EXPENSE','FEE')
                       AND (o.amountPaise > 0) != (NEW.amountPaise > 0)
                 );
+            SELECT RAISE(ABORT, 'txn: refunds plus friends shares can not exceed the original')
+                WHERE NEW.refundOfId IS NOT NULL AND NEW.status != 'IGNORED'
+                  AND NEW.amountPaise
+                    + COALESCE((SELECT SUM(r.amountPaise) FROM txn r WHERE r.refundOfId = NEW.refundOfId AND r.status != 'IGNORED' AND r.id IS NOT NEW.id), 0)
+                    + COALESCE((SELECT SUM(s.amountPaise) FROM shared_share s WHERE s.txnId = NEW.refundOfId), 0)
+                  > -(SELECT o.amountPaise FROM txn o WHERE o.id = NEW.refundOfId);
         END
     """.trimIndent()
 
@@ -64,9 +71,61 @@ object DatabaseSetup {
         BEGIN SELECT RAISE(ABORT, 'balance_anchor is append-only'); END
     """
 
+    // ---- Shared expenses (ADR-011)
+    private fun shareChecks(event: String) = """
+        CREATE TRIGGER IF NOT EXISTS trg_share_check_$event BEFORE $event ON shared_share
+        BEGIN
+            SELECT RAISE(ABORT, 'share: amount must be positive') WHERE NEW.amountPaise <= 0;
+            SELECT RAISE(ABORT, 'share: only a confirmed expense can be shared')
+                WHERE NOT EXISTS (SELECT 1 FROM txn t WHERE t.id = NEW.txnId AND t.kind = 'EXPENSE' AND t.status = 'CONFIRMED');
+            SELECT RAISE(ABORT, 'share: friends plus refunds can not exceed the bill')
+                WHERE NEW.amountPaise
+                    + COALESCE((SELECT SUM(o.amountPaise) FROM shared_share o WHERE o.txnId = NEW.txnId AND o.id IS NOT NEW.id), 0)
+                    + COALESCE((SELECT SUM(r.amountPaise) FROM txn r WHERE r.refundOfId = NEW.txnId AND r.status != 'IGNORED'), 0)
+                  > -(SELECT t.amountPaise FROM txn t WHERE t.id = NEW.txnId);
+            SELECT RAISE(ABORT, 'share: can not go below what was already paid back')
+                WHERE NEW.amountPaise < COALESCE((SELECT SUM(x.amountPaise) FROM settlement x WHERE x.shareId = NEW.id), 0);
+        END
+    """.trimIndent()
+
+    private const val SETTLEMENT_CHECK = """
+        CREATE TRIGGER IF NOT EXISTS trg_settlement_check BEFORE INSERT ON settlement
+        BEGIN
+            SELECT RAISE(ABORT, 'settlement: amount must be positive') WHERE NEW.amountPaise <= 0;
+            SELECT RAISE(ABORT, 'settlement: credit must be a confirmed repayment')
+                WHERE NOT EXISTS (SELECT 1 FROM txn t WHERE t.id = NEW.creditTxnId AND t.kind = 'REPAYMENT' AND t.status = 'CONFIRMED');
+            SELECT RAISE(ABORT, 'settlement: more than the share')
+                WHERE NEW.amountPaise + COALESCE((SELECT SUM(x.amountPaise) FROM settlement x WHERE x.shareId = NEW.shareId), 0)
+                    > (SELECT s.amountPaise FROM shared_share s WHERE s.id = NEW.shareId);
+            SELECT RAISE(ABORT, 'settlement: more than the repayment')
+                WHERE NEW.amountPaise + COALESCE((SELECT SUM(x.amountPaise) FROM settlement x WHERE x.creditTxnId = NEW.creditTxnId), 0)
+                    > (SELECT t.amountPaise FROM txn t WHERE t.id = NEW.creditTxnId);
+        END
+    """
+    private const val SETTLEMENT_NO_UPDATE = """
+        CREATE TRIGGER IF NOT EXISTS trg_settlement_no_update BEFORE UPDATE ON settlement
+        BEGIN SELECT RAISE(ABORT, 'settlement: delete and re-create instead of updating'); END
+    """
+
+    /** A shared bill / an applied repayment can't silently change into something the links no longer fit. */
+    private const val TXN_SHARED_GUARD = """
+        CREATE TRIGGER IF NOT EXISTS trg_txn_shared_guard BEFORE UPDATE ON txn
+        BEGIN
+            SELECT RAISE(ABORT, 'txn: a shared bill must stay a confirmed expense covering its shares')
+                WHERE EXISTS (SELECT 1 FROM shared_share s WHERE s.txnId = NEW.id)
+                  AND (NEW.kind != 'EXPENSE' OR NEW.status != 'CONFIRMED' OR NEW.accountId != OLD.accountId
+                       OR -NEW.amountPaise < COALESCE((SELECT SUM(s.amountPaise) FROM shared_share s WHERE s.txnId = NEW.id), 0)
+                           + COALESCE((SELECT SUM(r.amountPaise) FROM txn r WHERE r.refundOfId = NEW.id AND r.status != 'IGNORED'), 0));
+            SELECT RAISE(ABORT, 'txn: undo the repayment before changing it')
+                WHERE EXISTS (SELECT 1 FROM settlement x WHERE x.creditTxnId = NEW.id)
+                  AND (NEW.kind != 'REPAYMENT' OR NEW.status != 'CONFIRMED' OR NEW.amountPaise != OLD.amountPaise OR NEW.accountId != OLD.accountId);
+        END
+    """
+
     private val TRIGGER_NAMES = listOf(
         "trg_txn_check_INSERT", "trg_txn_check_UPDATE", "trg_transfer_check_INSERT", "trg_transfer_check_UPDATE",
         "trg_anchor_no_update", "trg_anchor_no_delete",
+        "trg_share_check_INSERT", "trg_share_check_UPDATE", "trg_settlement_check", "trg_settlement_no_update", "trg_txn_shared_guard",
     )
 
     val TRIGGERS: List<String> = listOf(
@@ -76,6 +135,11 @@ object DatabaseSetup {
         transferChecks("UPDATE"),
         ANCHOR_NO_UPDATE,
         ANCHOR_NO_DELETE,
+        shareChecks("INSERT"),
+        shareChecks("UPDATE"),
+        SETTLEMENT_CHECK,
+        SETTLEMENT_NO_UPDATE,
+        TXN_SHARED_GUARD,
     )
 
     /** Drops and recreates every trigger on each open, so a changed rule always replaces the installed one. */
@@ -90,6 +154,7 @@ object DatabaseSetup {
         SeedCategory(CATEGORY_TRANSFER, "Transfer", "SYSTEM", "swap_horiz", 0, system = true),
         SeedCategory(CATEGORY_REFUND, "Refund", "SYSTEM", "undo", 1, system = true),
         SeedCategory(CATEGORY_ADJUSTMENT, "Adjustment", "SYSTEM", "tune", 2, system = true),
+        SeedCategory(CATEGORY_REPAYMENT, "Paid back", "SYSTEM", "handshake", 3, system = true),
         SeedCategory(10, "Food & Dining", "EXPENSE", "restaurant", 3),
         SeedCategory(11, "Groceries", "EXPENSE", "local_grocery_store", 4),
         SeedCategory(12, "Shopping", "EXPENSE", "shopping_bag", 5),

@@ -441,11 +441,17 @@ private fun BalanceHero(view: AccountView) {
                 Column(Modifier.weight(1f)) {
                     Text("Income", style = MaterialTheme.typography.bodySmall, color = colors.text2)
                     Text(Money.format(v.month.incomePaise, Money.SignStyle.Always), style = SpendWise.money.large, color = colors.income)
+                    if (v.month.repaidPaise > 0) {
+                        Text("+ ${Money.format(v.month.repaidPaise)} paid back by friends", style = MaterialTheme.typography.bodySmall, color = colors.text2)
+                    }
                 }
                 Column(Modifier.weight(1f)) {
                     Text("Spent", style = MaterialTheme.typography.bodySmall, color = colors.text2)
                     // Spent is a net figure: refunds above spending show as a credit ("+₹500"), never "−−₹500".
                     Text(Money.format(-v.month.spentPaise, Money.SignStyle.Always), style = SpendWise.money.large, color = colors.expense)
+                    if (v.month.lentPaise > 0) {
+                        Text("+ ${Money.format(v.month.lentPaise)} paid for friends", style = MaterialTheme.typography.bodySmall, color = colors.text2)
+                    }
                 }
             }
         }

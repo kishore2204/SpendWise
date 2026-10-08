@@ -379,6 +379,59 @@ class IngestProcessorTest {
         assertThat(db.txnDao().getById(id)!!.categoryId).isEqualTo(19) // Health
     }
 
+    // ------------------------------------------------------------------ shared expenses (ADR-011)
+
+    private val shared by lazy { com.spendwise.app.domain.SharedExpenseLedger(db, clock) }
+    private fun ibCredit(rupees: String, rrn: String, payer: String = "Mr R Kumar") =
+        "Rs.$rupees credited to A/c *0000 on 07-10-26 by $payer. RRN $rrn. Avl Bal Rs.3068.44-Indian Bank"
+
+    @Test fun `money from a person is never one-tap income, even before any bill is shared`() = runTest {
+        val id = ingest("VM-INDBNK-S", ibCredit("15.00", "600000000130")).created.single()
+        assertThat(db.txnDao().getById(id)!!.confidence).isEqualTo(Confidence.NEEDS_REVIEW)
+        assertThat(ledger.confirmAllHighConfidence(indian)).isEqualTo(0)
+        assertThat(ledger.confirmOneTap(id)).isInstanceOf(LedgerResult.Rejected::class.java)
+        assertThat(month(indian).incomePaise).isEqualTo(0)
+    }
+
+    @Test fun `an SMS repayment that wasn't one goes back to review, not to income`() = runTest {
+        val bill = (ledger.addEntry(EntryInput(hdfc, TxnKind.EXPENSE, 3_000, 10, "Tea Point", null, day, PaymentMethod.UPI)) as LedgerResult.Ok).id
+        val ravi = (shared.friendNamed("Ravi") as LedgerResult.Ok).id
+        shared.share(bill, ravi, 1_500)
+        val c = ingest("VM-INDBNK-S", ibCredit("15.00", "600000000131")).created.single()
+        assertThat(shared.suggestionsFor(c).map { it.friendName }).containsExactly("Ravi")
+        assertThat(shared.markAsRepayment(c, ravi)).isInstanceOf(LedgerResult.Ok::class.java) // confirms it as a repayment
+        assertThat(shared.undoRepayment(c)).isInstanceOf(LedgerResult.Ok::class.java)
+        val t = db.txnDao().getById(c)!!
+        assertThat(t.status).isEqualTo(TxnStatus.PENDING)
+        assertThat(t.kind).isEqualTo(TxnKind.INCOME)
+        assertThat(month(indian).incomePaise).isEqualTo(0)
+    }
+
+    @Test fun `a repayment can't be undone once a bill it paid was forgiven`() = runTest {
+        val bill = (ledger.addEntry(EntryInput(hdfc, TxnKind.EXPENSE, 3_000, 10, "Tea Point", null, day, PaymentMethod.UPI)) as LedgerResult.Ok).id
+        val ravi = (shared.friendNamed("Ravi") as LedgerResult.Ok).id
+        val s = (shared.share(bill, ravi, 1_500) as LedgerResult.Ok).id
+        val c = ingest("VM-INDBNK-S", ibCredit("5.00", "600000000132")).created.single()
+        shared.markAsRepayment(c, ravi)
+        shared.forgive(s)
+        assertThat(shared.undoRepayment(c)).isInstanceOf(LedgerResult.Rejected::class.java)
+        assertThat(month(hdfc).spentPaise).isEqualTo(2_500)
+    }
+
+    @Test fun `possible duplicates and ignored credits can't become repayments`() = runTest {
+        val bill = (ledger.addEntry(EntryInput(hdfc, TxnKind.EXPENSE, 3_000, 10, "Tea Point", null, day, PaymentMethod.UPI)) as LedgerResult.Ok).id
+        val ravi = (shared.friendNamed("Ravi") as LedgerResult.Ok).id
+        shared.share(bill, ravi, 1_500)
+        val a = ingest("VM-INDBNK-S", ibCredit("15.00", "600000000133")).created.single()
+        ledger.ignore(a)
+        assertThat(shared.markAsRepayment(a, ravi)).isInstanceOf(LedgerResult.Rejected::class.java)
+        val noRef = "Rs.15.00 credited to A/c *0000 on 07-10-26 by Mr R Kumar. Avl Bal Rs.3068.44-Indian Bank"
+        ingest("VM-INDBNK-S", noRef, sentAt = day + 60_000)
+        val dup = ingest("VM-INDBNK-S", noRef.replace("3068.44", "3083.44"), sentAt = day + 120_000).created.single()
+        assertThat(db.txnDao().getById(dup)!!.possibleDupOfId).isNotNull()
+        assertThat(shared.markAsRepayment(dup, ravi)).isInstanceOf(LedgerResult.Rejected::class.java)
+    }
+
     @Test fun `fingerprints ignore whitespace and secrets and links are redacted before storage`() {
         assertThat(Fingerprint.of("VM-INDBNK-S", day, day, "a  b\nc")).isEqualTo(Fingerprint.of("JD-INDBNK-T", day + 400, day, "a b c"))
         assertThat(Fingerprint.of("VM-INDBNK-S", day, day, "a b")).isNotEqualTo(Fingerprint.of("VM-INDBNK-S", day + 1_000, day, "a b"))

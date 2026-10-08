@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.SmsFailed
 import androidx.compose.material3.AlertDialog
@@ -72,6 +73,7 @@ class MoreViewModel @Inject constructor(
 fun MoreScreen(
     onSmsSetup: () -> Unit,
     onUnreadable: () -> Unit,
+    onFriends: () -> Unit,
     viewModel: MoreViewModel = hiltViewModel(),
 ) {
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
@@ -121,6 +123,18 @@ fun MoreScreen(
                         ),
                     )
                 }
+            }
+        }
+
+        item(key = "friends-label") { SectionLabel("Shared bills") }
+        item(key = "friends") {
+            GroupCard {
+                ListRow(
+                    title = "Friends",
+                    subtitle = "Who owes you for bills you paid",
+                    leadingIcon = Icons.Rounded.Group,
+                    onClick = onFriends,
+                )
             }
         }
 

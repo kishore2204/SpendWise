@@ -88,6 +88,8 @@ class DebugSeedReceiver : BroadcastReceiver() {
             30 to ib("Sent Rs.99.00 from A/c *9999 on $dash to Tea Point.RRN ${ref(6)}.Avl Bal Rs.500.00.Not you?SMS BLOCK to 9289592895-Indian Bank"),
             // Not a transaction → dropped, no text kept.
             20 to ib("482913 is your OTP for txn of Rs.500.00 at Amazon. Do not share. -Indian Bank"),
+            // A friend paying back half of the Swiggy order (split it with "Ravi" first) → "Paid back by Ravi?".
+            5 to ib("Rs.225.00 credited to A/c *0000 on $dash by Mr R Kumar. RRN ${ref(8)}. Avl Bal Rs.13255.00-Indian Bank"),
             // Financial but unreadable → "Couldn't read".
             10 to ib("Rs.250.00 has been processed on your A/c *0000. Ref ${ref(7)}"),
         )

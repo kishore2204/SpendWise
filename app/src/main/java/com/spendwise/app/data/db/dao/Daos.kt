@@ -148,6 +148,8 @@ interface LedgerDao {
      *  - Income = INCOME + INTEREST, minus reversals of money that came in (negative REVERSAL).
      *  - Spent  = EXPENSE + FEE, minus REFUNDs and reversals of money that went out (positive REVERSAL).
      *  - Transfer-family kinds (TRANSFER_*, ATM_WITHDRAWAL, CASH_DEPOSIT) are never income or expense.
+     *  - Shared bills (ADR-011): Spent is the user's OWN share — friends' parts are reported as "lent"; a friend's
+     *    REPAYMENT is reported as "paid back", never income.
      * Spent can be negative in a month where refunds exceed spending; the UI shows that as a net credit.
      */
     @Query(
@@ -157,7 +159,12 @@ interface LedgerDao {
                             WHEN kind = 'REVERSAL' AND amountPaise < 0 THEN amountPaise ELSE 0 END), 0) AS incomePaise,
           COALESCE(SUM(CASE WHEN kind IN ('EXPENSE','FEE') THEN -amountPaise
                             WHEN kind = 'REFUND' THEN -amountPaise
-                            WHEN kind = 'REVERSAL' AND amountPaise > 0 THEN -amountPaise ELSE 0 END), 0) AS spentPaise
+                            WHEN kind = 'REVERSAL' AND amountPaise > 0 THEN -amountPaise ELSE 0 END), 0)
+            - (SELECT COALESCE(SUM(e.excludedPaise), 0) FROM v_share_excluded e
+               WHERE e.accountId = :accountId AND e.localEpochDay BETWEEN :fromDay AND :toDay) AS spentPaise,
+          (SELECT COALESCE(SUM(e.excludedPaise), 0) FROM v_share_excluded e
+           WHERE e.accountId = :accountId AND e.localEpochDay BETWEEN :fromDay AND :toDay) AS lentPaise,
+          COALESCE(SUM(CASE WHEN kind = 'REPAYMENT' THEN amountPaise ELSE 0 END), 0) AS repaidPaise
         FROM v_confirmed_txn
         WHERE accountId = :accountId AND localEpochDay BETWEEN :fromDay AND :toDay
         """,
@@ -165,7 +172,14 @@ interface LedgerDao {
     fun observePeriodSummary(accountId: Long, fromDay: Long, toDay: Long): Flow<PeriodSummary>
 }
 
-data class PeriodSummary(val incomePaise: Long, val spentPaise: Long)
+data class PeriodSummary(
+    val incomePaise: Long,
+    val spentPaise: Long,
+    /** Friends' parts of this account's bills (not the user's spending). */
+    val lentPaise: Long = 0,
+    /** Repayments from friends that landed in this account (not income). */
+    val repaidPaise: Long = 0,
+)
 
 data class BalanceTotals(val displayedPaise: Long, val fromTransactionsPaise: Long)
 

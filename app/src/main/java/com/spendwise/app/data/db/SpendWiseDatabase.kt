@@ -1,5 +1,6 @@
 package com.spendwise.app.data.db
 
+import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -24,8 +25,10 @@ import com.spendwise.app.data.db.entity.TxnSourceEntity
 import com.spendwise.app.data.db.entity.TxnSplitEntity
 
 @Database(
-    version = 1,
+    version = 2,
     exportSchema = true,
+    // 1 → 2: shared expenses (ADR-011) — new tables and a view only.
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
     entities = [
         AccountEntity::class,
         NotMineEntity::class,
@@ -40,8 +43,12 @@ import com.spendwise.app.data.db.entity.TxnSplitEntity
         MerchantRuleEntity::class,
         BudgetEntity::class,
         RecurringRuleEntity::class,
+        com.spendwise.app.data.db.entity.FriendEntity::class,
+        com.spendwise.app.data.db.entity.FriendAliasEntity::class,
+        com.spendwise.app.data.db.entity.SharedShareEntity::class,
+        com.spendwise.app.data.db.entity.SettlementEntity::class,
     ],
-    views = [ConfirmedTxnView::class],
+    views = [ConfirmedTxnView::class, com.spendwise.app.data.db.entity.ShareExcludedView::class],
 )
 abstract class SpendWiseDatabase : RoomDatabase() {
     abstract fun accountDao(): AccountDao
@@ -53,6 +60,7 @@ abstract class SpendWiseDatabase : RoomDatabase() {
     abstract fun rawMessageDao(): com.spendwise.app.data.db.dao.RawMessageDao
     abstract fun notMineDao(): com.spendwise.app.data.db.dao.NotMineDao
     abstract fun reviewDao(): com.spendwise.app.data.db.dao.ReviewDao
+    abstract fun friendDao(): com.spendwise.app.data.db.dao.FriendDao
 
     companion object {
         const val NAME = "spendwise.db"

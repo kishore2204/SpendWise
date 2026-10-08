@@ -84,6 +84,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -100,6 +101,8 @@ data class TxnDetailState(
     val pairSuggestions: List<PairSuggestion> = emptyList(),
     /** The SMS landed shortly after a balance the user entered — it may already be included (ADR-004 latency). */
     val nearAnchor: Boolean = false,
+    /** Friends' parts of this bill (ADR-011). */
+    val shares: List<com.spendwise.app.data.db.dao.ShareRow> = emptyList(),
     /** The bank SMS this transaction came from (empty for manual entries). */
     val sources: List<com.spendwise.app.data.db.entity.RawMessageEntity> = emptyList(),
 )
@@ -113,6 +116,7 @@ class TransactionDetailViewModel @AssistedInject constructor(
     private val db: SpendWiseDatabase,
     private val ledger: TransactionLedger,
     private val clock: Clock,
+    private val shared: com.spendwise.app.domain.SharedExpenseLedger,
 ) : ViewModel() {
     @AssistedFactory
     interface Factory {
@@ -129,12 +133,15 @@ class TransactionDetailViewModel @AssistedInject constructor(
         else db.categoryDao().observeVisible(r.accountId, if (r.amountPaise > 0) CategoryKind.INCOME else CategoryKind.EXPENSE)
     }
 
-    val state: StateFlow<TxnDetailState> = combine(row, db.txnDao().observeSplits(txnId), categories, deleted) { r, s, c, d ->
-        TxnDetailState(r, s, c, deleted = d)
+    val state: StateFlow<TxnDetailState> = combine(
+        row, db.txnDao().observeSplits(txnId), categories, deleted, db.friendDao().observeSharesOfBill(txnId),
+    ) { r, s, c, d, sh ->
+        TxnDetailState(r, s, c, deleted = d, shares = sh)
     }.mapLatest { st ->
         val r = st.row ?: return@mapLatest st
+        // What is neither refunded nor a friend's part: the room left for a refund or another share (ADR-011).
         val refundable = if ((r.kind == TxnKind.EXPENSE || r.kind == TxnKind.FEE) && r.status == com.spendwise.app.data.db.entity.TxnStatus.CONFIRMED) {
-            abs(r.amountPaise) - db.txnDao().refundedSoFar(r.id)
+            abs(r.amountPaise) - db.txnDao().refundedSoFar(r.id) - st.shares.sumOf { it.amountPaise }
         } else {
             0
         }
@@ -185,6 +192,31 @@ class TransactionDetailViewModel @AssistedInject constructor(
 
     fun unsplit() = viewModelScope.launch { ledger.removeSplits(txnId, state.value.splits.maxByOrNull { abs(it.amountPaise) }?.categoryId) }
 
+    // ---- Shared expenses (ADR-011)
+    val friends = db.friendDao().observeFriends().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val settlements = db.friendDao().observeSettlementsOfCredit(txnId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Friends who still owe something (names only — amounts are per account, shown on the Friends screen). */
+    val owingFriends = db.friendDao().observeOutstanding()
+        .map { rows -> rows.distinctBy { it.friendId }.map { it.friendId to it.friendName } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val repaymentSuggestions = combine(row, owingFriends) { r, _ -> r }
+        .mapLatest { r -> if (r == null) emptyList() else shared.suggestionsFor(r.id) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun shareWith(friendName: String, paise: Long) = run({
+        when (val f = shared.friendNamed(friendName)) {
+            is LedgerResult.Ok -> shared.share(txnId, f.id, paise)
+            is LedgerResult.Rejected -> f
+        }
+    }, {})
+
+    fun removeShare(shareId: Long) = run({ shared.removeShare(shareId) }, {})
+    fun forgive(shareId: Long) = run({ shared.forgive(shareId) }, {})
+    fun markRepayment(friendId: Long) = run({ shared.markAsRepayment(txnId, friendId) }, {})
+    fun undoRepayment() = run({ shared.undoRepayment(txnId) }, {})
+
     /** Review (Phase 5): the user's decision is the only thing that makes an SMS transaction count. */
     fun confirm(categoryId: Long?) = run({ ledger.confirm(txnId, categoryId) }, {})
 
@@ -208,12 +240,18 @@ fun TransactionDetailScreen(
     txnId: Long,
     onClose: () -> Unit,
     onEdit: (Long) -> Unit,
+    onOpenTransaction: (Long) -> Unit = {},
+    onOpenFriend: (Long) -> Unit = {},
     viewModel: TransactionDetailViewModel = hiltViewModel<TransactionDetailViewModel, TransactionDetailViewModel.Factory>(
         key = "txn-$txnId",
     ) { it.create(txnId) },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val friends by viewModel.friends.collectAsStateWithLifecycle()
+    val settlements by viewModel.settlements.collectAsStateWithLifecycle()
+    val owingFriends by viewModel.owingFriends.collectAsStateWithLifecycle()
+    val repaymentSuggestions by viewModel.repaymentSuggestions.collectAsStateWithLifecycle()
     val colors = SpendWise.colors
     var panel by remember { mutableStateOf(Panel.None) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -286,12 +324,42 @@ fun TransactionDetailScreen(
                     }
                 }
             }
+            // ---- Shared expenses (ADR-011)
+            if (row.kind == TxnKind.EXPENSE && row.status == TxnStatus.CONFIRMED) {
+                item(key = "shares") {
+                    com.spendwise.app.feature.friends.BillSharesSection(
+                        billPaise = row.amountPaise,
+                        shares = state.shares,
+                        friends = friends,
+                        roomPaise = state.refundable,
+                        onShare = viewModel::shareWith,
+                        onRemove = viewModel::removeShare,
+                        onForgive = viewModel::forgive,
+                        onOpenFriend = onOpenFriend,
+                    )
+                }
+            }
+            if (row.amountPaise > 0 && (row.kind == TxnKind.INCOME || row.kind == TxnKind.UNKNOWN) && row.status != TxnStatus.IGNORED &&
+                row.counterpartyAccount == null && row.refundOfId == null
+            ) {
+                item(key = "repayment") {
+                    com.spendwise.app.feature.friends.RepaymentPrompt(repaymentSuggestions, owingFriends, onMark = viewModel::markRepayment)
+                }
+            }
+            if (row.kind == TxnKind.REPAYMENT) {
+                item(key = "repaid") {
+                    com.spendwise.app.feature.friends.RepaymentDetails(settlements, fromSms = state.sources.isNotEmpty(), onOpenBill = onOpenTransaction, onUndo = viewModel::undoRepayment)
+                }
+            }
             item(key = "info-label") { SectionLabel("Details") }
             item(key = "info") {
                 GroupCard {
                     if (isTransfer) {
                         InfoRow("Between your accounts", row.counterpartyAccount?.let { if (row.amountPaise < 0) "To $it" else "From $it" } ?: "—")
                         InfoRow("Counts as", "Transfer — never income or spending")
+                    } else if (row.kind == TxnKind.REPAYMENT) {
+                        InfoRow("Counts as", "A friend paying you back — not income")
+                        row.merchantRaw?.let { InfoRow("From", it) }
                     } else {
                         InfoRow("Category", if (row.hasSplits) "Split (${state.splits.size} parts)" else row.categoryName ?: "Uncategorised")
                         row.merchantRaw?.let { InfoRow(if (row.amountPaise > 0) "From" else "Paid to", it) }
@@ -320,11 +388,11 @@ fun TransactionDetailScreen(
             item(key = "actions-label") { SectionLabel("Actions") }
             item(key = "actions") {
                 GroupCard {
-                    if (row.kind != TxnKind.REFUND) {
+                    if (row.kind != TxnKind.REFUND && row.kind != TxnKind.REPAYMENT) {
                         ListRow(title = "Edit", leadingIcon = Icons.Rounded.Edit, onClick = { onEdit(row.id) })
                         HorizontalDivider(color = colors.divider, modifier = Modifier.padding(start = 68.dp))
                     }
-                    if (!isTransfer && row.kind != TxnKind.REFUND) {
+                    if (!isTransfer && row.kind != TxnKind.REFUND && row.kind != TxnKind.REPAYMENT) {
                         if (row.hasSplits) {
                             ListRow(title = "Remove split", subtitle = "Back to one category", leadingIcon = Icons.Rounded.CallSplit, onClick = viewModel::unsplit)
                         } else {

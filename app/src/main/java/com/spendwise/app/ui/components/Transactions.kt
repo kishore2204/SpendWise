@@ -1,5 +1,6 @@
 package com.spendwise.app.ui.components
 
+import androidx.compose.material.icons.rounded.Handshake
 import androidx.compose.material.icons.rounded.Checkroom
 import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
 import androidx.compose.material.icons.rounded.Devices
@@ -103,6 +104,7 @@ object CategoryIcons {
         "swap_horiz" -> Icons.Rounded.SwapHoriz
         "undo" -> Icons.AutoMirrored.Rounded.Undo
         "tune" -> Icons.Rounded.Tune
+        "handshake" -> Icons.Rounded.Handshake
         "checkroom" -> Icons.Rounded.Checkroom
         "directions_walk" -> Icons.AutoMirrored.Rounded.DirectionsWalk
         "devices" -> Icons.Rounded.Devices
@@ -123,6 +125,7 @@ object TxnText {
         TxnKind.ATM_WITHDRAWAL -> "Cash withdrawal"
         TxnKind.CASH_DEPOSIT -> "Cash deposit"
         TxnKind.REFUND -> "Refund · ${row.merchantRaw?.let(Merchants::display) ?: row.categoryName ?: ""}".trimEnd(' ', '·')
+        TxnKind.REPAYMENT -> "Paid back · ${row.merchantRaw?.let(Merchants::display) ?: "friend"}"
         else -> row.merchantRaw?.let(Merchants::display) ?: row.categoryName ?: kindLabel(row.kind)
     }
 
@@ -137,6 +140,7 @@ object TxnText {
         TxnKind.INTEREST -> "Interest"
         TxnKind.REVERSAL -> "Reversal"
         TxnKind.UNKNOWN -> "Unknown"
+        TxnKind.REPAYMENT -> "Paid back"
     }
 
     fun method(m: PaymentMethod): String? = when (m) {
@@ -172,7 +176,7 @@ fun TransactionRowView(row: TxnRow, onClick: () -> Unit, modifier: Modifier = Mo
     val isTransfer = row.kind.isTransferFamily
     val icon = if (isTransfer) Icons.Rounded.SwapHoriz else CategoryIcons.of(row.categoryIcon)
     val amountColor = when {
-        isTransfer -> colors.transfer
+        isTransfer || row.kind == TxnKind.REPAYMENT -> colors.transfer // neither income nor spending
         row.amountPaise > 0 -> colors.income
         else -> colors.text1
     }

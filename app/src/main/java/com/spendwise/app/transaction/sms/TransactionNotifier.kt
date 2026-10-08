@@ -140,7 +140,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         scope.launch {
             try {
                 when (action) {
-                    TransactionNotifier.ACTION_CONFIRM -> ep.ledger().confirm(id)
+                    TransactionNotifier.ACTION_CONFIRM -> ep.ledger().confirmOneTap(id)
                     TransactionNotifier.ACTION_IGNORE -> ep.ledger().ignore(id)
                 }
                 ep.notifier().cancel(id)

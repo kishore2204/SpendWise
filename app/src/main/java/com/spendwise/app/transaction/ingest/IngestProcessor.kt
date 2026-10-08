@@ -19,6 +19,7 @@ import com.spendwise.app.data.db.entity.TxnKind
 import com.spendwise.app.data.db.entity.TxnSourceEntity
 import com.spendwise.app.data.db.entity.TxnStatus
 import com.spendwise.app.domain.TransactionLedger
+import com.spendwise.app.domain.looksLikeRepayment
 import com.spendwise.app.domain.signedFor
 import com.spendwise.app.transaction.parsing.Direction
 import com.spendwise.app.transaction.parsing.ParseResult
@@ -193,7 +194,10 @@ class IngestProcessor @Inject constructor(
         // ---- Confidence: the parser's verdict, demoted for anything the user must look at (ADR-004 latency risk:
         // "Already included in the balance you entered?").
         var confidence = Confidence.valueOf(result.confidence.name)
-        val demote = !directionOk || possibleDup != null || transferLike ||
+        // Money from a person may be a friend paying back (even before the bill is shared) — never one-tap income.
+        val maybeRepayment = isCredit && (kind == TxnKind.INCOME || kind == TxnKind.UNKNOWN) &&
+            (Merchants.looksLikePerson(p.merchant) || db.looksLikeRepayment(signed, p.merchant ?: p.vpa))
+        val demote = !directionOk || possibleDup != null || transferLike || maybeRepayment ||
             kind == TxnKind.REVERSAL || kind == TxnKind.REFUND ||
             (account.type == AccountType.CREDIT_CARD && isCredit) || // card payment ≠ income: pair it as a transfer
             anchorMayCoverIn(account.id, occurredAt, timeSource, row.sentAt)

@@ -65,6 +65,8 @@ import kotlinx.serialization.Serializable
 @Serializable data object ReviewRoute : NavKey
 @Serializable data object SmsSetupRoute : NavKey
 @Serializable data object UnreadableRoute : NavKey
+@Serializable data object FriendsRoute : NavKey
+@Serializable data class FriendRoute(val friendId: Long) : NavKey
 @Serializable data class AccountDetailRoute(val accountId: Long) : NavKey
 
 private val TopLevelItems = listOf(
@@ -184,6 +186,17 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
                         MoreScreen(
                             onSmsSetup = { backStack.add(SmsSetupRoute) },
                             onUnreadable = { backStack.add(UnreadableRoute) },
+                            onFriends = { backStack.add(FriendsRoute) },
+                        )
+                    }
+                    entry<FriendsRoute> {
+                        com.spendwise.app.feature.friends.FriendsScreen(onClose = { backStack.removeLastOrNull() }, onOpenFriend = { backStack.add(FriendRoute(it)) })
+                    }
+                    entry<FriendRoute> { key ->
+                        com.spendwise.app.feature.friends.FriendDetailScreen(
+                            friendId = key.friendId,
+                            onClose = { backStack.removeLastOrNull() },
+                            onOpenBill = { backStack.add(TransactionDetailRoute(it)) },
                         )
                     }
                     entry<ReviewRoute> {
@@ -207,6 +220,8 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
                             txnId = key.txnId,
                             onClose = { backStack.removeLastOrNull() },
                             onEdit = { backStack.add(AddTransactionRoute(editId = it)) },
+                            onOpenTransaction = { backStack.add(TransactionDetailRoute(it)) },
+                            onOpenFriend = { backStack.add(FriendRoute(it)) },
                         )
                     }
                 },

@@ -21,6 +21,8 @@ enum class TxnKind(val direction: Direction, val isTransferFamily: Boolean = fal
     FEE(Direction.OUT),
     INTEREST(Direction.IN),
     REVERSAL(Direction.EITHER),
+    /** A friend paying back their share of a bill (ADR-011). Money in, but never income. */
+    REPAYMENT(Direction.IN),
     UNKNOWN(Direction.EITHER);
 
     enum class Direction { IN, OUT, EITHER }
