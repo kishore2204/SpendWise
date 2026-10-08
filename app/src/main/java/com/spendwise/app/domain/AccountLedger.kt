@@ -13,6 +13,7 @@ import com.spendwise.app.data.db.entity.CategoryKind
 import javax.inject.Inject
 import javax.inject.Singleton
 
+
 /** Input for a new account. Banks are data: [bankCode] is the detection key (e.g. INDBNK), [bankName] is display. */
 data class NewAccount(
     val bankCode: String,
@@ -43,6 +44,70 @@ class AccountLedger @Inject constructor(
     private val db: SpendWiseDatabase,
     private val clock: Clock,
 ) {
+    /** Bank snapshot compared with the ledger at the SMS timestamp, plus its effect on today's displayed amount. */
+    data class SmsBalanceComparison(
+        val accountId: Long,
+        val reportedPaise: Long,
+        val displayedNowPaise: Long,
+        val estimatedAtSmsPaise: Long,
+        val adjustmentPaise: Long,
+        val observedAt: Long,
+    )
+
+    /**
+     * A recent bank SMS is only comparable when this account has no later manual anchor. Confirmed activity after
+     * the SMS is backed out of today's balance so reconciling preserves that later activity.
+     */
+    suspend fun compareSmsBalance(accountId: Long, reportedPaise: Long, observedAt: Long): SmsBalanceComparison? = db.withTransaction {
+        compareSmsBalanceInTransaction(accountId, reportedPaise, observedAt)
+    }
+
+    private suspend fun compareSmsBalanceInTransaction(accountId: Long, reportedPaise: Long, observedAt: Long): SmsBalanceComparison? {
+        val account = db.accountDao().getById(accountId) ?: return null
+        val now = clock.now()
+        if (account.archivedAt != null || account.type == AccountType.CREDIT_CARD || observedAt > now || now - observedAt > SMS_BALANCE_MAX_AGE_MS) {
+            return null
+        }
+        if ((db.ledgerDao().latestAnchor(accountId)?.effectiveAt ?: Long.MIN_VALUE) > observedAt) return null
+        if (db.ledgerDao().hasConfirmedAfter(accountId, now)) return null
+        val displayed = db.ledgerDao().displayedBalance(accountId)
+        val confirmedAfterSms = db.ledgerDao().confirmedBetween(accountId, observedAt, now)
+        val atSms = displayed - confirmedAfterSms
+        val adjustment = reportedPaise - atSms
+        if (adjustment == 0L) return null
+        return SmsBalanceComparison(accountId, reportedPaise, displayed, atSms, adjustment, observedAt)
+    }
+
+    /** Applies a shown SMS comparison as a new anchor, preserving confirmed transactions after the SMS. */
+    suspend fun reconcileSmsBalance(txnId: Long, accountId: Long, reportedPaise: Long, observedAt: Long): LedgerResult = db.withTransaction {
+        val txn = db.txnDao().getById(txnId)
+            ?: return@withTransaction LedgerResult.Rejected("Transaction not found")
+        if (
+            txn.accountId != accountId || txn.status != com.spendwise.app.data.db.entity.TxnStatus.CONFIRMED ||
+            txn.reportedBalancePaise != reportedPaise || txn.reportedBalanceAt != observedAt || db.txnDao().sourceCount(txnId) == 0
+        ) {
+            return@withTransaction LedgerResult.Rejected("Only a confirmed SMS transaction can reconcile its own account")
+        }
+        val comparison = compareSmsBalanceInTransaction(accountId, reportedPaise, observedAt)
+            ?: return@withTransaction LedgerResult.Rejected("This SMS is no longer safe to reconcile. Use Edit Balance to update it.")
+        val account = db.accountDao().getById(accountId)
+            ?: return@withTransaction LedgerResult.Rejected("Account not found")
+        val now = clock.now()
+        val latest = db.ledgerDao().latestAnchor(accountId)
+        val effectiveAt = maxOf(now, (latest?.effectiveAt ?: Long.MIN_VALUE) + 1)
+        db.ledgerDao().insertAnchor(
+            BalanceAnchorEntity(
+                accountId = accountId,
+                effectiveAt = effectiveAt,
+                balancePaise = storedBalance(account.type, comparison.displayedNowPaise + comparison.adjustmentPaise),
+                source = AnchorSource.RECONCILE,
+                note = "Bank SMS reported balance",
+                createdAt = now,
+            ),
+        )
+        LedgerResult.Ok(accountId)
+    }
+
     suspend fun createAccount(input: NewAccount): CreateAccountResult {
         val bankCode = input.bankCode.trim().uppercase()
         val last4 = input.last4.filter(Char::isDigit)
@@ -145,6 +210,10 @@ class AccountLedger @Inject constructor(
                 note = anchor.note,
             )
         }
+    }
+
+    companion object {
+        const val SMS_BALANCE_MAX_AGE_MS = 72L * 60 * 60 * 1000
     }
 }
 

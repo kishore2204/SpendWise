@@ -122,6 +122,8 @@ data class TxnEntity(
     val bankRef: String? = null,
     /** "Avl Bal" reported by the bank after this transaction, if any. Never applied automatically. */
     val reportedBalancePaise: Long? = null,
+    /** SMS timestamp that reported the balance; required to compare a snapshot with the ledger safely. */
+    val reportedBalanceAt: Long? = null,
     val refundOfId: Long? = null,
     val possibleDupOfId: Long? = null,
     val note: String? = null,

@@ -35,6 +35,8 @@ This file holds the **non-negotiable rules**. Detailed knowledge lives in `docs/
 - A refund links to its original transaction; analytics show the net effect.
 - The sum of a split's parts equals the parent amount, exactly, in paise.
 - Balances are computed, never cached, from **anchors** (ADR-004): displayed = latest anchor + Σ confirmed legs after it. A manual edit or reconcile appends an anchor; it never edits or deletes transactions. Imported history before an anchor can't change today's balance.
+- An SMS-reported balance is only a suggestion after its transaction is confirmed. Reconciliation requires explicit confirmation, freshness/anchor revalidation and an append-only `AccountLedger` anchor; never auto-adjust or infer a missing transaction (ADR-012).
+- Home and Insights use shared `Asia/Kolkata` calendar periods; weeks begin Monday. Every total remains scoped to one selected account (ADR-013).
 - All balance/analytics queries read the `v_confirmed_txn` view — never the raw `txn` table.
 - Credit cards: the user enters what they OWE; `AccountLedger.storedBalance` stores it negative (create, edit, reconcile). Never re-implement that sign rule elsewhere.
 - `balance_anchor` is append-only (SQL triggers). Write anchors only through `AccountLedger`.

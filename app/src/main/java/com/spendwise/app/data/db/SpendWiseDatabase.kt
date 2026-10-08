@@ -25,10 +25,10 @@ import com.spendwise.app.data.db.entity.TxnSourceEntity
 import com.spendwise.app.data.db.entity.TxnSplitEntity
 
 @Database(
-    version = 2,
+    version = 3,
     exportSchema = true,
     // 1 → 2: shared expenses (ADR-011) — new tables and a view only.
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
     entities = [
         AccountEntity::class,
         NotMineEntity::class,

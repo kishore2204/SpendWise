@@ -1,12 +1,10 @@
 package com.spendwise.app.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -25,12 +23,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +47,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import com.kyant.shapes.Capsule
+import com.spendwise.app.ui.glass.GlassKind
+import com.spendwise.app.ui.glass.liquidGlass
 import com.spendwise.app.ui.theme.SpendWise
 import com.spendwise.app.ui.theme.Spacing
 
@@ -64,6 +68,8 @@ fun LargeTitleScreen(
     modifier: Modifier = Modifier,
     collapsedTitle: String = title,
     eyebrow: String? = null,
+    titleBottomSpacing: Dp = Spacing.lg,
+    glassTitle: Boolean = false,
     reserveBottomBar: Boolean = true,
     content: LazyListScope.() -> Unit,
 ) {
@@ -79,7 +85,7 @@ fun LargeTitleScreen(
     val topBar = LocalGlassTopBar.current
     if (topBar != null) {
         val owner = remember { Any() }
-        LaunchedEffect(topBar, collapsed, scrolled, collapsedTitle) {
+        SideEffect {
             topBar.owner = owner
             topBar.title = collapsedTitle
             topBar.scrolled = scrolled
@@ -105,7 +111,13 @@ fun LargeTitleScreen(
         ),
     ) {
         item(key = "large-title", contentType = "header") {
-            LargeHeader(title = title, eyebrow = eyebrow, topSpace = (screenHeight * 0.14f).coerceAtLeast(48.dp))
+            LargeHeader(
+                title = title,
+                eyebrow = eyebrow,
+                topSpace = (screenHeight * 0.14f).coerceAtLeast(48.dp),
+                bottomSpacing = titleBottomSpacing,
+                glassTitle = glassTitle,
+            )
         }
         content()
     }
@@ -121,7 +133,7 @@ fun GlassTopBar(state: GlassTopBarState, modifier: Modifier = Modifier) {
     val colors = SpendWise.colors
     val backdrop = LocalContentBackdrop.current
     val allowed = LocalBlurAllowed.current
-    AnimatedVisibility(visible = state.scrolled, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
+    if (state.scrolled) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -152,10 +164,10 @@ fun GlassTopBar(state: GlassTopBarState, modifier: Modifier = Modifier) {
                 .height(72.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
-            AnimatedVisibility(visible = state.titleVisible, enter = fadeIn(), exit = fadeOut()) {
+            if (state.titleVisible) {
                 Text(
                     state.title.orEmpty(),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
                     color = colors.text1,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -167,15 +179,45 @@ fun GlassTopBar(state: GlassTopBarState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun LargeHeader(title: String, eyebrow: String?, topSpace: Dp) {
+private fun LargeHeader(title: String, eyebrow: String?, topSpace: Dp, bottomSpacing: Dp, glassTitle: Boolean) {
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = Spacing.screen).padding(bottom = Spacing.lg),
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.screen).padding(bottom = bottomSpacing),
     ) {
         Spacer(Modifier.height(topSpace))
         if (eyebrow != null) {
             Text(eyebrow, style = MaterialTheme.typography.titleSmall, color = SpendWise.colors.text2)
             Spacer(Modifier.height(Spacing.xxs))
         }
-        Text(title, style = MaterialTheme.typography.displaySmall, color = SpendWise.colors.text1)
+        Text(
+            title,
+            style = MaterialTheme.typography.displaySmall,
+            color = SpendWise.colors.text1,
+            modifier = if (glassTitle) Modifier
+                .liquidGlass(Capsule(), GlassKind.Card)
+                .padding(horizontal = Spacing.md, vertical = Spacing.xs)
+            else Modifier,
+        )
+    }
+}
+
+/** Compact account context used below large titles on single-account reports and lists. */
+@Composable
+fun AccountContextPill(label: String) {
+    Row(
+        Modifier
+            .padding(horizontal = Spacing.screen, vertical = Spacing.xxs)
+            .widthIn(max = 320.dp)
+            .liquidGlass(Capsule(), GlassKind.Card)
+            .clip(CircleShape)
+            .padding(horizontal = Spacing.md, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = SpendWise.colors.text1,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

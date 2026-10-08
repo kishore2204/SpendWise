@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -49,16 +50,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -68,6 +74,7 @@ import com.kyant.shapes.Capsule
 import com.spendwise.app.core.money.Money
 import com.spendwise.app.core.time.Clock
 import com.spendwise.app.core.time.IndiaTime
+import com.spendwise.app.domain.analytics.ReportPeriod
 import com.spendwise.app.data.account.AccountRepository
 import com.spendwise.app.data.account.BalanceBreakdown
 import com.spendwise.app.data.account.SelectedAccountStore
@@ -78,6 +85,8 @@ import com.spendwise.app.feature.accounts.AccountVisuals
 import com.spendwise.app.ui.components.EmptyState
 import com.spendwise.app.ui.components.LargeTitleScreen
 import com.spendwise.app.ui.components.LiquidPrimaryButton
+import com.spendwise.app.ui.components.LiquidPeriodPickerOverlay
+import com.spendwise.app.ui.components.LiquidPeriodPickerTrigger
 import com.spendwise.app.ui.components.ListRow
 import com.spendwise.app.ui.components.MoneyText
 import com.spendwise.app.ui.components.SectionLabel
@@ -134,6 +143,17 @@ class HomeViewModel @Inject constructor(
     val detected: StateFlow<List<DetectedAccount>> =
         detectedAccounts.detected.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val _period = MutableStateFlow(ReportPeriod.MONTH)
+    val period: StateFlow<ReportPeriod> = _period.asStateFlow()
+    private val _periodRefresh = MutableStateFlow(0)
+    fun selectPeriod(value: ReportPeriod) { _period.value = value }
+    fun refreshPeriod() { _periodRefresh.value += 1 }
+    fun millisToNextIndiaMidnight(): Long {
+        val now = clock.now()
+        val tomorrow = IndiaTime.localDate(now).plusDays(1)
+        return (IndiaTime.startOfDay(tomorrow) - now).coerceAtLeast(1_000)
+    }
+
     private val _smsOn = MutableStateFlow(sync.canReceiveSms())
     val smsOn: StateFlow<Boolean> = _smsOn.asStateFlow()
     fun recheckSms() { _smsOn.value = sync.canReceiveSms() }
@@ -166,17 +186,19 @@ class HomeViewModel @Inject constructor(
 
     fun notMine(account: DetectedAccount) = viewModelScope.launch { detectedAccounts.markNotMine(account.bankCode, account.last4) }
 
-    private val selectedView: Flow<AccountView?> = selectedStore.selectedAccountId.flatMapLatest { id ->
+    private val selectedView: Flow<AccountView?> = combine(selectedStore.selectedAccountId, _period, _periodRefresh) { id, p, _ -> id to p }
+        .flatMapLatest { (id, p) ->
         if (id == null) {
             flowOf(null)
         } else {
+            val range = p.range(ReportPeriod.today(clock.now()))
             // Re-subscribes per account, so a switch can never show the previous account's numbers.
             combine(
                 repository.observeAccount(id),
                 repository.observeBalance(id),
-                repository.observeThisMonth(id, clock.now()),
+                repository.observePeriod(id, range),
                 txnDao.observeRecent(id, 5),
-            ) { account, balance, month, recent -> account?.let { AccountView(id, it, balance, month, recent) } }
+            ) { account, balance, summary, recent -> account?.let { AccountView(id, it, balance, summary, recent) } }
         }
     }
 
@@ -208,13 +230,23 @@ fun HomeScreen(
     val smsOn by viewModel.smsOn.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val refreshMessage by viewModel.refreshMessage.collectAsStateWithLifecycle()
+    val selectedPeriod by viewModel.period.collectAsStateWithLifecycle()
     LifecycleResumeEffect(Unit) {
         viewModel.recheckSms()
+        viewModel.refreshPeriod()
         onPauseOrDispose { }
+    }
+    LaunchedEffect(viewModel) {
+        while (true) {
+            delay(viewModel.millisToNextIndiaMidnight())
+            viewModel.refreshPeriod()
+        }
     }
     val pullState = rememberPullToRefreshState()
     val greeting = IndiaTime.greetingFor(System.currentTimeMillis()).text
     var switcherOpen by rememberSaveable { mutableStateOf(false) }
+    var periodPickerOpen by rememberSaveable { mutableStateOf(false) }
+    var periodAnchor by remember { mutableStateOf<Rect?>(null) }
 
     PullToRefreshBox(
         isRefreshing = refreshing,
@@ -259,13 +291,45 @@ fun HomeScreen(
                         selected = s.selected.account,
                         accounts = s.accounts,
                         open = switcherOpen,
-                        onToggle = { switcherOpen = !switcherOpen },
+                        onToggle = {
+                            if (!switcherOpen) periodPickerOpen = false
+                            switcherOpen = !switcherOpen
+                        },
                         onSelect = { id ->
                             viewModel.select(id)
                             switcherOpen = false
                         },
                         onManage = onManageAccounts,
                     )
+                }
+                item(key = "home-period") {
+                    val fontScale = LocalDensity.current.fontScale
+                    Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.screen)) {
+                        if (fontScale >= 1.8f) {
+                            Text("Period", style = MaterialTheme.typography.labelMedium, color = SpendWise.colors.text2)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (fontScale < 1.8f) {
+                                Text("Period", style = MaterialTheme.typography.labelMedium, color = SpendWise.colors.text2, modifier = Modifier.weight(1f))
+                            }
+                            LiquidPeriodPickerTrigger(
+                                selected = selectedPeriod,
+                                expanded = periodPickerOpen,
+                                onToggle = {
+                                    if (periodPickerOpen) {
+                                        periodPickerOpen = false
+                                    } else {
+                                        switcherOpen = false
+                                        periodPickerOpen = true
+                                    }
+                                },
+                                onAnchorChanged = { periodAnchor = it },
+                                modifier = if (fontScale >= 1.8f) Modifier.fillMaxWidth()
+                                else Modifier.width(150.dp * fontScale.coerceAtMost(1.9f)),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(Spacing.md))
                 }
                 item(key = "hero", contentType = "hero") { BalanceHero(s.selected) }
                 if (pendingCount > 0) {
@@ -311,6 +375,13 @@ fun HomeScreen(
             }
         }
     }
+    LiquidPeriodPickerOverlay(
+        expanded = periodPickerOpen,
+        selected = selectedPeriod,
+        anchorInWindow = periodAnchor,
+        onDismiss = { periodPickerOpen = false },
+        onSelect = viewModel::selectPeriod,
+    )
     }
 }
 
@@ -356,6 +427,7 @@ private fun AccountSwitcher(
     Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.screen)) {
         Row(
             Modifier
+                .widthIn(max = 320.dp)
                 .liquidGlass(Capsule(), GlassKind.Card)
                 .clip(CircleShape)
                 .clickable {
@@ -372,7 +444,7 @@ private fun AccountSwitcher(
                 transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(120)) },
                 label = "pill",
             ) { label ->
-                Text(label, style = MaterialTheme.typography.titleSmall, color = colors.text1)
+                Text(label, style = MaterialTheme.typography.titleSmall, color = colors.text1, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(Spacing.xxs))
             Icon(
@@ -414,11 +486,13 @@ private fun AccountSwitcher(
     }
 }
 
-/** The selected account's balance and this month; crossfades when the account changes. */
+/** The selected account's current balance and selected-period summary; crossfades on account changes. */
 @Composable
 private fun BalanceHero(view: AccountView) {
     val colors = SpendWise.colors
     val motion = SpendWise.motion
+    val heroAmountStyle = SpendWise.money.hero
+    val summaryAmountStyle = SpendWise.money.large
     AnimatedContent(
         targetState = view,
         contentKey = { it.accountId },
@@ -432,23 +506,22 @@ private fun BalanceHero(view: AccountView) {
                 .liquidGlass(RoundedCornerShape(Radius.card), GlassKind.Card)
                 .padding(Spacing.lg),
         ) {
-            MoneyText(v.balance.displayedPaise, style = SpendWise.money.hero)
+            MoneyText(v.balance.displayedPaise, style = heroAmountStyle)
             Text("Current balance", style = MaterialTheme.typography.labelMedium, color = colors.text2)
             Spacer(Modifier.height(Spacing.lg))
-            Text("This month", style = MaterialTheme.typography.labelMedium, color = colors.text2)
             Spacer(Modifier.height(Spacing.xs))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.lg)) {
                 Column(Modifier.weight(1f)) {
-                    Text("Income", style = MaterialTheme.typography.bodySmall, color = colors.text2)
-                    Text(Money.format(v.month.incomePaise, Money.SignStyle.Always), style = SpendWise.money.large, color = colors.income)
+                    Text("Income", style = MaterialTheme.typography.labelMedium, color = colors.text2)
+                    MoneyText(v.month.incomePaise, style = summaryAmountStyle, color = colors.income, sign = Money.SignStyle.Always)
                     if (v.month.repaidPaise > 0) {
                         Text("+ ${Money.format(v.month.repaidPaise)} paid back by friends", style = MaterialTheme.typography.bodySmall, color = colors.text2)
                     }
                 }
                 Column(Modifier.weight(1f)) {
-                    Text("Spent", style = MaterialTheme.typography.bodySmall, color = colors.text2)
+                    Text("Spent", style = MaterialTheme.typography.labelMedium, color = colors.text2)
                     // Spent is a net figure: refunds above spending show as a credit ("+₹500"), never "−−₹500".
-                    Text(Money.format(-v.month.spentPaise, Money.SignStyle.Always), style = SpendWise.money.large, color = colors.expense)
+                    MoneyText(-v.month.spentPaise, style = summaryAmountStyle, color = colors.expense, sign = Money.SignStyle.Always)
                     if (v.month.lentPaise > 0) {
                         Text("+ ${Money.format(v.month.lentPaise)} paid for friends", style = MaterialTheme.typography.bodySmall, color = colors.text2)
                     }

@@ -277,6 +277,40 @@ object Recurring {
 data class Insight(val title: String, val body: String)
 
 object Insights {
+    /** Plain-language observations for a selected day/week/year range compared with the preceding equal range. */
+    fun forPeriod(
+        current: AnaInput,
+        previous: AnaInput,
+        days: Int,
+        previousLabel: String,
+        categoryName: (Long?) -> String,
+        format: (Long) -> String,
+    ): List<Insight> {
+        val out = mutableListOf<Insight>()
+        val spent = Analytics.spent(current)
+        val before = Analytics.spent(previous)
+        if (spent > 0) {
+            out += Insight("Average ${format(spent / days.coerceAtLeast(1))} a day", "Across $days calendar ${if (days == 1) "day" else "days"} in this period.")
+        }
+        if (spent > 0 && before > 0) {
+            val difference = spent - before
+            val percent = kotlin.math.abs(difference) * 100 / before
+            if (percent >= 10) out += Insight(
+                if (difference > 0) "Up $percent%" else "Down $percent%",
+                "${format(spent)} compared with the $previousLabel (${format(before)}).",
+            )
+        }
+        val categories = Analytics.spendByCategory(current)
+        val gross = categories.filter { it.second > 0 }.sumOf { it.second }
+        categories.firstOrNull()?.takeIf { it.second > 0 && gross > 0 }?.let { (id, amount) ->
+            out += Insight("${categoryName(id)} is your biggest category", "${format(amount)} — ${amount * 100 / gross}% of your spending.")
+        }
+        Analytics.topMerchants(current, 10).maxByOrNull { it.count }?.takeIf { it.count >= 3 }?.let { merchant ->
+            out += Insight("${merchant.name}: ${merchant.count} times", "${format(merchant.paise)} in this period.")
+        }
+        return out
+    }
+
     /**
      * Plain-language observations for ONE account's month. [today] decides how much of the month has passed (only for
      * the current month); [previous] is the previous month of the same account. Integer math only.

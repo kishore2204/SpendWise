@@ -98,6 +98,7 @@ class IngestProcessorTest {
         assertThat(t.kind).isEqualTo(TxnKind.EXPENSE)
         assertThat(t.bankRef).isEqualTo("600000000006")
         assertThat(t.reportedBalancePaise).isEqualTo(256_844)
+        assertThat(t.reportedBalanceAt).isEqualTo(day)
         assertThat(t.paymentMethod).isEqualTo(PaymentMethod.UPI)
         assertThat(balance(indian)).isEqualTo(1_000_000) // pending never affects a balance
         assertThat(month(indian).spentPaise).isEqualTo(0)

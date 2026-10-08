@@ -6,6 +6,7 @@ import com.spendwise.app.data.db.dao.AccountWithBalance
 import com.spendwise.app.data.db.dao.LedgerDao
 import com.spendwise.app.data.db.dao.PeriodSummary
 import com.spendwise.app.data.db.entity.AccountEntity
+import com.spendwise.app.domain.analytics.ReportDateRange
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.time.YearMonth
@@ -39,6 +40,10 @@ class AccountRepository @Inject constructor(
         val month = YearMonth.from(IndiaTime.localDate(nowMillis))
         return ledgerDao.observePeriodSummary(accountId, month.atDay(1).toEpochDay(), month.atEndOfMonth().toEpochDay())
     }
+
+    /** Confirmed income/spending in a selected date range for ONE account. */
+    fun observePeriod(accountId: Long, range: ReportDateRange): Flow<PeriodSummary> =
+        ledgerDao.observePeriodSummary(accountId, range.fromEpochDay, range.toEpochDay)
 
     /** Re-emits whenever this account's anchors change (drives the adjustment-history list). */
     fun observeAnchorsChanged(accountId: Long) = ledgerDao.observeAnchors(accountId)

@@ -27,7 +27,7 @@ class MigrationTest {
     @get:Rule
     val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), SpendWiseDatabase::class.java)
 
-    @Test fun `version 1 to 2 keeps every account, anchor and transaction and enables shared expenses`() = runTest {
+    @Test fun `version 1 to 3 keeps every account anchor and transaction and adds SMS balance time`() = runTest {
         // Full path on both sides (room-testing compares names literally; a bare name fails on Windows hosts).
         val dbPath = ApplicationProvider.getApplicationContext<Context>().getDatabasePath("migration-test.db").path
         helper.createDatabase(dbPath, 1).apply {
@@ -44,7 +44,7 @@ class MigrationTest {
             )
             close()
         }
-        helper.runMigrationsAndValidate(dbPath, 2, true).close()
+        helper.runMigrationsAndValidate(dbPath, 3, true).close()
 
         // Open it the way the app does: callbacks re-create triggers and seed new categories on open.
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -53,6 +53,10 @@ class MigrationTest {
         try {
             val repo = AccountRepository(db.accountDao(), db.ledgerDao())
             assertThat(repo.observeBalance(1).first().displayedPaise).isEqualTo(4_997_000)
+            db.openHelper.writableDatabase.query("SELECT reportedBalanceAt FROM txn WHERE id = 1").use { cursor ->
+                assertThat(cursor.moveToFirst()).isTrue()
+                assertThat(cursor.isNull(0)).isTrue()
+            }
             assertThat(db.categoryDao().getById(DatabaseSetup.CATEGORY_REPAYMENT)).isNotNull()
             assertThat(db.categoryDao().getById(28)?.name).isEqualTo("Clothing") // added categories reach old installs
 

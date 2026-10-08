@@ -218,11 +218,7 @@ fun TransactionRowView(row: TxnRow, onClick: () -> Unit, modifier: Modifier = Mo
             }
         }
         Spacer(Modifier.width(Spacing.xs))
-        Text(
-            Money.format(row.amountPaise, Money.SignStyle.Always),
-            style = SpendWise.money.row,
-            color = amountColor,
-        )
+        MoneyText(row.amountPaise, style = SpendWise.money.row, color = amountColor, sign = Money.SignStyle.Always)
     }
 }
 

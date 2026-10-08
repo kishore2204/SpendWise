@@ -52,7 +52,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -115,6 +114,9 @@ private fun <K> LiquidTabs(
     val haptics = LocalHapticFeedback.current
     val contentBackdrop = LocalContentBackdrop.current
     val refraction = LocalBlurAllowed.current
+    // Four labels cannot fit without collisions at large accessibility font scales. The tabs
+    // become icon-only while retaining explicit TalkBack labels.
+    val showLabels = LocalDensity.current.fontScale < 1.3f
     val accentLayer = rememberLayerBackdrop()
     val dropletBackdrop = if (contentBackdrop != null) rememberCombinedBackdrop(contentBackdrop, accentLayer) else accentLayer
     val scope = rememberCoroutineScope()
@@ -190,7 +192,9 @@ private fun <K> LiquidTabs(
                                 haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                                 onSelect(item.key)
                             },
-                        ),
+                        )
+                        .then(if (showLabels) Modifier else Modifier.semantics { contentDescription = item.label }),
+                    showLabel = showLabels,
                 )
             }
         }
@@ -212,7 +216,7 @@ private fun <K> LiquidTabs(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             items.forEachIndexed { index, item ->
-                TabContent(item, selected = true, tint = Color.White, modifier = Modifier.weight(1f).fillMaxHeight(), emphasized = true)
+                TabContent(item, selected = true, tint = Color.White, modifier = Modifier.weight(1f).fillMaxHeight(), emphasized = true, showLabel = showLabels)
             }
         }
 
@@ -253,22 +257,30 @@ private fun <K> LiquidTabs(
 }
 
 @Composable
-private fun <K> TabContent(item: BottomBarItem<K>, selected: Boolean, tint: Color, modifier: Modifier, emphasized: Boolean = false) {
+private fun <K> TabContent(
+    item: BottomBarItem<K>,
+    selected: Boolean,
+    tint: Color,
+    modifier: Modifier,
+    emphasized: Boolean = false,
+    showLabel: Boolean = true,
+) {
     Column(
         modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Icon(if (selected) item.selectedIcon else item.icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-        Text(
-            item.label,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 12.sp,
-                fontWeight = if (emphasized) FontWeight.SemiBold else FontWeight.Medium,
-            ),
-            color = tint,
-            maxLines = 1,
-        )
+        if (showLabel) {
+            Text(
+                item.label,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = if (emphasized) FontWeight.SemiBold else FontWeight.Medium,
+                ),
+                color = tint,
+                maxLines = 1,
+            )
+        }
     }
 }
 

@@ -223,6 +223,7 @@ class IngestProcessor @Inject constructor(
             paymentMethod = p.paymentMethod,
             bankRef = refForInsert,
             reportedBalancePaise = p.availableBalancePaise,
+            reportedBalanceAt = row.sentAt.takeIf { p.availableBalancePaise != null },
             possibleDupOfId = possibleDup,
             createdAt = now,
             updatedAt = now,
@@ -253,6 +254,7 @@ class IngestProcessor @Inject constructor(
                 existing.copy(
                     bankRef = ref,
                     reportedBalancePaise = existing.reportedBalancePaise ?: reportedBalance,
+                    reportedBalanceAt = existing.reportedBalanceAt ?: row.sentAt.takeIf { reportedBalance != null },
                     updatedAt = clock.now(),
                 ),
             )

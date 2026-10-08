@@ -39,7 +39,7 @@ object Money {
     }
 
     /**
-     * Formats paise as INR with Indian digit grouping: 12345670 → "₹1,23,456.70".
+     * Formats paise as INR with Indian digit grouping and a thin visual gap after ₹: 12345670 → "₹ 1,23,456.70".
      * Paise are omitted when zero unless [alwaysShowPaise]. The sign is controlled by [sign].
      */
     fun format(
@@ -52,7 +52,7 @@ object Money {
         val rupees = abs / PAISE_PER_RUPEE
         val fraction = abs % PAISE_PER_RUPEE
         val body = buildString {
-            append('₹')
+            append('₹').append('\u2009')
             append(groupIndian(rupees))
             if (alwaysShowPaise || fraction != 0L) {
                 append('.')
@@ -85,12 +85,12 @@ object Money {
             else -> 1L to ""
         }
         val text = if (unit == 1L) {
-            "₹$rupees"
+            "₹\u2009$rupees"
         } else {
             val tenths = rupees * 10 / unit
             val whole = tenths / 10
             val dec = tenths % 10
-            if (dec == 0L) "₹$whole$suffix" else "₹$whole.$dec$suffix"
+            if (dec == 0L) "₹\u2009$whole$suffix" else "₹\u2009$whole.$dec$suffix"
         }
         return if (negative) "−$text" else text
     }

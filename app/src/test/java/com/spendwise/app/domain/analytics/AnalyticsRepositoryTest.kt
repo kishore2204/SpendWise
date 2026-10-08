@@ -159,6 +159,32 @@ class AnalyticsRepositoryTest {
         assertThat(h.accountId).isEqualTo(hdfc)
     }
 
+    @Test fun `day week and year views use selected account and matching calendar ranges`() = runTest {
+        spend(hdfc, 10_000, "Monday", 10, at(10, 19))
+        spend(hdfc, 20_000, "Tuesday", 10, at(10, 20))
+        spend(hdfc, 30_000, "Sunday", 10, at(10, 25))
+        spend(hdfc, 40_000, "Next Monday", 10, at(10, 26))
+        spend(hdfc, 5_000, "Previous week", 10, at(10, 12))
+        spend(hdfc, 50_000, "January", 10, at(1, 10))
+        spend(indian, 99_000, "Other account", 10, at(10, 20))
+        val today = java.time.LocalDate.of(2026, 10, 20)
+
+        val day = repo.observeRange(hdfc, ReportPeriod.DAY.range(today), ReportPeriod.DAY).first()
+        assertThat(day.spentPaise).isEqualTo(20_000)
+        assertThat(day.accountId).isEqualTo(hdfc)
+        assertThat(day.rangeStart).isEqualTo(today)
+
+        val week = repo.observeRange(hdfc, ReportPeriod.WEEK.range(today), ReportPeriod.WEEK).first()
+        assertThat(week.spentPaise).isEqualTo(30_000)
+        assertThat(week.previousSpentPaise).isEqualTo(5_000)
+        assertThat(week.daily).hasLength(2)
+
+        val year = repo.observeRange(hdfc, ReportPeriod.YEAR.range(today), ReportPeriod.YEAR).first()
+        assertThat(year.spentPaise).isEqualTo(85_000)
+        assertThat(year.trend).hasSize(12)
+        assertThat(year.spendByCategory.sumOf { it.second }).isEqualTo(year.spentPaise)
+    }
+
     @Test fun `a budget carries forward month to month, per account, and 0 removes it`() = runTest {
         repo.setBudget(hdfc, 10, 500_000, YearMonth.of(2026, 9))
         repo.setBudget(hdfc, DatabaseSetup.CATEGORY_ALL_SPENDING, 2_000_000, YearMonth.of(2026, 9))

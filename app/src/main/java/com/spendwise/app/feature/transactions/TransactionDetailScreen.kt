@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +57,7 @@ import com.spendwise.app.transaction.ingest.IngestProcessor
 import com.spendwise.app.ui.components.LiquidPrimaryButton
 import com.spendwise.app.data.db.entity.TxnSplitEntity
 import com.spendwise.app.domain.LedgerResult
+import com.spendwise.app.domain.AccountLedger
 import com.spendwise.app.domain.SplitPart
 import com.spendwise.app.domain.TransactionLedger
 import com.spendwise.app.ui.components.CategoryIcons
@@ -107,6 +109,9 @@ data class TxnDetailState(
     val shares: List<com.spendwise.app.data.db.dao.ShareRow> = emptyList(),
     /** The bank SMS this transaction came from (empty for manual entries). */
     val sources: List<com.spendwise.app.data.db.entity.RawMessageEntity> = emptyList(),
+    val accountLabel: String? = null,
+    val smsBalanceComparison: AccountLedger.SmsBalanceComparison? = null,
+    val displayedBalancePaise: Long? = null,
 )
 
 data class PairSuggestion(val txnId: Long, val accountName: String, val sharedRef: Boolean, val otherPending: Boolean, val otherAt: Long)
@@ -120,6 +125,7 @@ class TransactionDetailViewModel @AssistedInject constructor(
     private val clock: Clock,
     private val shared: com.spendwise.app.domain.SharedExpenseLedger,
     private val categoryLedger: com.spendwise.app.domain.CategoryLedger,
+    private val accountLedger: AccountLedger,
 ) : ViewModel() {
     @AssistedFactory
     interface Factory {
@@ -136,11 +142,16 @@ class TransactionDetailViewModel @AssistedInject constructor(
         else db.categoryDao().observeVisible(r.accountId, if (r.amountPaise > 0) CategoryKind.INCOME else CategoryKind.EXPENSE)
     }
 
+    private val displayedBalance = row.flatMapLatest { r ->
+        if (r == null) flowOf(null) else db.ledgerDao().observeDisplayedBalance(r.accountId).map { it }
+    }
+
     val state: StateFlow<TxnDetailState> = combine(
-        row, db.txnDao().observeSplits(txnId), categories, deleted, db.friendDao().observeSharesOfBill(txnId),
-    ) { r, s, c, d, sh ->
-        TxnDetailState(r, s, c, deleted = d, shares = sh)
-    }.mapLatest { st ->
+        combine(row, db.txnDao().observeSplits(txnId), categories, deleted, db.friendDao().observeSharesOfBill(txnId)) { r, s, c, d, sh ->
+            TxnDetailState(r, s, c, deleted = d, shares = sh)
+        },
+        displayedBalance,
+    ) { base, balance -> base.copy(displayedBalancePaise = balance) }.mapLatest { st ->
         val r = st.row ?: return@mapLatest st
         // What is neither refunded nor a friend's part: the room left for a refund or another share (ADR-011).
         val refundable = if ((r.kind == TxnKind.EXPENSE || r.kind == TxnKind.FEE) && r.status == com.spendwise.app.data.db.entity.TxnStatus.CONFIRMED) {
@@ -165,6 +176,13 @@ class TransactionDetailViewModel @AssistedInject constructor(
             emptyList()
         }
         val entity = db.txnDao().getById(r.id)
+        val sources = db.rawMessageDao().sourcesFor(r.id)
+        val account = db.accountDao().getById(r.accountId)
+        val balanceComparison = if (
+            r.status == TxnStatus.CONFIRMED && entity?.reportedBalancePaise != null && entity.reportedBalanceAt != null
+        ) {
+            accountLedger.compareSmsBalance(r.accountId, entity.reportedBalancePaise, entity.reportedBalanceAt)
+        } else null
         val nearAnchor = pending && entity != null && db.ledgerDao().latestAnchor(r.accountId)?.let { a ->
             IngestProcessor.anchorMayCover(a.effectiveAt, entity.occurredAt, entity.timeSource, entity.createdAt)
         } == true
@@ -172,7 +190,9 @@ class TransactionDetailViewModel @AssistedInject constructor(
             refundable = refundable,
             pairSuggestions = suggestions,
             nearAnchor = nearAnchor,
-            sources = db.rawMessageDao().sourcesFor(r.id),
+            sources = sources,
+            accountLabel = account?.let { "${it.nickname} ••${it.last4}".trimEnd(' ', '•') },
+            smsBalanceComparison = balanceComparison,
             refundOf = ledger.refundSuggestions(r.id),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TxnDetailState())
@@ -241,6 +261,12 @@ class TransactionDetailViewModel @AssistedInject constructor(
     /** Review (Phase 5): the user's decision is the only thing that makes an SMS transaction count. */
     fun confirm(categoryId: Long?) = run({ ledger.confirm(txnId, categoryId) }, {})
 
+    fun reconcileSmsBalance(comparison: AccountLedger.SmsBalanceComparison) {
+        val transaction = state.value.row ?: return
+        if (comparison.accountId != transaction.accountId) return
+        run({ accountLedger.reconcileSmsBalance(transaction.id, comparison.accountId, comparison.reportedPaise, comparison.observedAt) }, {})
+    }
+
     fun ignore(onDone: () -> Unit) = run({ ledger.ignore(txnId) }, onDone)
 
     fun pair(otherId: Long) = run({ ledger.pairAsTransfer(txnId, otherId) }, {})
@@ -276,8 +302,10 @@ fun TransactionDetailScreen(
     val colors = SpendWise.colors
     var panel by remember { mutableStateOf(Panel.None) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var dismissSmsBalance by rememberSaveable(state.row?.id) { mutableStateOf(false) }
     BackHandler(onBack = { if (panel != Panel.None) panel = Panel.None else onClose() })
     LaunchedEffect(state.deleted) { if (state.deleted) onClose() }
+    LaunchedEffect(state.row?.id, state.row?.status) { dismissSmsBalance = false }
 
     val row = state.row
     Box(Modifier.fillMaxSize()) {
@@ -483,6 +511,29 @@ fun TransactionDetailScreen(
             containerColor = colors.surface1,
         )
     }
+
+    val comparison = state.smsBalanceComparison
+    if (!dismissSmsBalance && comparison != null && row?.status == TxnStatus.CONFIRMED) {
+        AlertDialog(
+            onDismissRequest = { dismissSmsBalance = true },
+            title = { Text("Bank SMS balance differs") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    Text(state.accountLabel ?: "This account", style = MaterialTheme.typography.labelLarge, color = colors.text2)
+                    Text("SMS reported ${Money.format(comparison.reportedPaise)} at ${FULL_DATE.format(java.time.Instant.ofEpochMilli(comparison.observedAt).atZone(IndiaTime.ZONE))}.")
+                    Text("SpendWise estimates ${Money.format(comparison.estimatedAtSmsPaise)} at that time; current balance is ${Money.format(comparison.displayedNowPaise)}.")
+                    Text("Reconciliation adds a balance adjustment and keeps later confirmed transactions. Holds or pending bank activity can also cause a difference.", style = MaterialTheme.typography.bodySmall, color = colors.text2)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { dismissSmsBalance = true; viewModel.reconcileSmsBalance(comparison) }) {
+                    Text("Reconcile", color = colors.primary)
+                }
+            },
+            dismissButton = { TextButton(onClick = { dismissSmsBalance = true }) { Text("Not now", color = colors.text2) } },
+            containerColor = colors.surface1,
+        )
+    }
 }
 
 /** Waiting for review: keep or change the suggested category, then Confirm — or Ignore. Nothing counts until then. */
@@ -554,7 +605,7 @@ private fun InfoRow(label: String, value: String) {
 
 @Composable
 private fun RefundPanel(maxPaise: Long, onCancel: () -> Unit, onSave: (Long) -> Unit) {
-    var amount by remember { mutableStateOf(Money.format(maxPaise, Money.SignStyle.None).removePrefix("₹")) }
+    var amount by remember { mutableStateOf(Money.format(maxPaise, Money.SignStyle.None).removePrefix("₹").trimStart()) }
     var error by remember { mutableStateOf<String?>(null) }
     Spacer(Modifier.height(Spacing.md))
     GroupCard {
@@ -581,7 +632,7 @@ private class PartDraft(categoryId: Long?, amount: String) {
 @Composable
 private fun SplitPanel(totalPaise: Long, currentCategory: Long?, categories: List<CategoryEntity>, onCancel: () -> Unit, onSave: (List<SplitPart>) -> Unit) {
     val colors = SpendWise.colors
-    val parts = remember { mutableStateListOf(PartDraft(currentCategory, Money.format(totalPaise, Money.SignStyle.None).removePrefix("₹")), PartDraft(null, "")) }
+    val parts = remember { mutableStateListOf(PartDraft(currentCategory, Money.format(totalPaise, Money.SignStyle.None).removePrefix("₹").trimStart()), PartDraft(null, "")) }
     val entered = parts.sumOf { parseSignedRupees(it.amount) ?: 0L }
     val remaining = totalPaise - entered
     Spacer(Modifier.height(Spacing.md))
@@ -617,7 +668,7 @@ private fun SplitPanel(totalPaise: Long, currentCategory: Long?, categories: Lis
                 )
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.xs), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { parts.add(PartDraft(null, if (remaining > 0) Money.format(remaining, Money.SignStyle.None).removePrefix("₹") else "")) }) {
+                TextButton(onClick = { parts.add(PartDraft(null, if (remaining > 0) Money.format(remaining, Money.SignStyle.None).removePrefix("₹").trimStart() else "")) }) {
                     Text("Add part", color = colors.primary)
                 }
                 Row {

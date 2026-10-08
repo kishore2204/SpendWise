@@ -15,6 +15,12 @@ Each major decision is made through `/council` and recorded here. A superseded A
 | [009](ADR-009-calm-glass-and-palette.md) | Calm glass: neutral background, minimal 3-hue palette (solid cards revised by 010) | Accepted |
 | [010](ADR-010-guilloche-pattern.md) | Monochrome guilloché pattern behind glass; cards glass again; pattern cached as bitmap | Accepted (user decision) |
 | [011](ADR-011-shared-expenses.md) | Shared expenses: friend shares + settlements + `REPAYMENT` kind; own spending excludes shares | Accepted (per account only — user decision) |
+| [012](ADR-012-sms-balance-reconciliation.md) | Confirmed SMS balance snapshots can append a safe, user-approved reconcile anchor | Accepted |
+| [013](ADR-013-calendar-report-periods.md) | Shared IST calendar periods for Home and Insights | Accepted |
+| [014](ADR-014-confirmed-merchant-category-learning.md) | Confirmed merchant category corrections reuse exact normalized rules | Accepted |
+| [015](ADR-015-period-controls-and-report-context.md) | Separate period controls from account selection; keep account-scoped report context below title | Accepted |
+| [016](ADR-016-typography-and-comfortaa.md) | Selective Comfortaa for headings and larger labels; system fonts for body, scripts, and tabular financial values | Accepted |
+| [017](ADR-017-navigation-and-insights-stability.md) | Keep route changes settled; publish a single account-and-period-keyed Insights state | Accepted |
 
 ## Planned councils
 - Final product & engineering review (Phase 10)

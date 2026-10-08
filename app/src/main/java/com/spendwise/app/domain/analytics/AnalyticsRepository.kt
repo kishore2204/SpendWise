@@ -25,10 +25,15 @@ import javax.inject.Singleton
 /** A tracked recurring payment with its next due day worked out from the latest actual payment. */
 data class TrackedBill(val rule: RecurringRuleEntity, val nextDueDay: Long, val lastPaidDay: Long?)
 
-/** Everything the Insights tab shows for ONE account and ONE month. [accountId] stamps whose it is (ADR-003). */
+/** Everything the Insights tab shows for ONE account and ONE selected calendar range (ADR-003). */
 data class MonthAnalytics(
     val accountId: Long,
     val month: YearMonth,
+    val period: ReportPeriod = ReportPeriod.MONTH,
+    val rangeStart: LocalDate = month.atDay(1),
+    val rangeEnd: LocalDate = month.atEndOfMonth(),
+    val periodLabel: String = ReportPeriod.MONTH.label(ReportDateRange(month.atDay(1), month.atEndOfMonth())),
+    val previousLabel: String = "last month",
     val spentPaise: Long,
     val incomePaise: Long,
     val lentPaise: Long,
@@ -50,10 +55,17 @@ data class MonthAnalytics(
 @Singleton
 class AnalyticsRepository @Inject constructor(private val db: SpendWiseDatabase, private val clock: Clock) {
 
-    fun observe(accountId: Long, month: YearMonth): Flow<MonthAnalytics> {
-        val first = month.minusMonths(TREND_MONTHS - 1L)
-        val from = first.atDay(1).toEpochDay()
-        val to = month.atEndOfMonth().toEpochDay()
+    fun observe(accountId: Long, month: YearMonth): Flow<MonthAnalytics> =
+        observeRange(accountId, ReportDateRange(month.atDay(1), month.atEndOfMonth()), ReportPeriod.MONTH)
+
+    fun observeRange(accountId: Long, range: ReportDateRange, period: ReportPeriod): Flow<MonthAnalytics> {
+        val previous = period.previous(range)
+        val month = YearMonth.from(range.start)
+        val endMonth = YearMonth.from(range.endInclusive)
+        val trendMonths = if (period == ReportPeriod.YEAR) YEAR_TREND_MONTHS else TREND_MONTHS
+        val trendStart = endMonth.minusMonths(trendMonths - 1L).atDay(1)
+        val from = minOf(trendStart, range.start, previous.start).toEpochDay()
+        val to = maxOf(range.endInclusive, previous.endInclusive).toEpochDay()
         val dao = db.analyticsDao()
         val data = combine(
             dao.observeRows(accountId, from, to),
@@ -78,7 +90,7 @@ class AnalyticsRepository @Inject constructor(private val db: SpendWiseDatabase,
             dao.observeRecurring(accountId),
             db.categoryDao().observeAll(),
         ) { all, billRows, budgets, rules, categories ->
-            build(accountId, month, all, billRows.map(::toAna), budgets, rules, categories.associateBy { it.id })
+            build(accountId, range, previous, period, all, billRows.map(::toAna), budgets, rules, categories.associateBy { it.id }, trendMonths)
         }.flowOn(Dispatchers.Default)
     }
 
@@ -87,17 +99,21 @@ class AnalyticsRepository @Inject constructor(private val db: SpendWiseDatabase,
 
     private fun build(
         accountId: Long,
-        month: YearMonth,
+        range: ReportDateRange,
+        previous: ReportDateRange,
+        period: ReportPeriod,
         all: AnaInput,
         billRows: List<AnaTxn>,
         budgets: List<BudgetEntity>,
         rules: List<RecurringRuleEntity>,
         categories: Map<Long, CategoryEntity>,
+        trendMonths: Int,
     ): MonthAnalytics {
+        val month = YearMonth.from(range.start)
         val today = IndiaTime.localDate(clock.now())
-        fun within(ym: YearMonth) = all.copy(txns = all.txns.filter { it.day in ym.atDay(1).toEpochDay()..ym.atEndOfMonth().toEpochDay() })
-        val cur = within(month)
-        val prev = within(month.minusMonths(1))
+        fun within(from: LocalDate, to: LocalDate) = all.copy(txns = all.txns.filter { it.day in from.toEpochDay()..to.toEpochDay() })
+        val cur = within(range.start, range.endInclusive)
+        val prev = within(previous.start, previous.endInclusive)
         val byCategory = Analytics.spendByCategory(cur)
         val spent = Analytics.spent(cur)
         val name = { id: Long? -> id?.let { categories[it]?.name } ?: "Uncategorised" }
@@ -111,6 +127,11 @@ class AnalyticsRepository @Inject constructor(private val db: SpendWiseDatabase,
         return MonthAnalytics(
             accountId = accountId,
             month = month,
+            period = period,
+            rangeStart = range.start,
+            rangeEnd = range.endInclusive,
+            periodLabel = period.label(range),
+            previousLabel = if (period == ReportPeriod.MONTH) "last month" else "previous ${period.name.lowercase()}",
             spentPaise = spent,
             incomePaise = Analytics.income(cur),
             lentPaise = cur.sharesExcluded.filterKeys { id -> cur.txns.any { it.id == id } }.values.sum(),
@@ -118,10 +139,14 @@ class AnalyticsRepository @Inject constructor(private val db: SpendWiseDatabase,
             previousSpentPaise = Analytics.spent(prev),
             spendByCategory = byCategory,
             incomeByCategory = Analytics.incomeByCategory(cur),
-            daily = Analytics.dailySpend(cur, month.atDay(1), month.atEndOfMonth()),
-            trend = Analytics.monthly(all, (TREND_MONTHS - 1 downTo 0).map { month.minusMonths(it.toLong()) }),
+            daily = Analytics.dailySpend(cur, range.start, range.endInclusive),
+            trend = Analytics.monthly(all, (trendMonths - 1 downTo 0).map { YearMonth.from(range.endInclusive).minusMonths(it.toLong()) }),
             topMerchants = Analytics.topMerchants(cur),
-            insights = Insights.forMonth(month, today, cur, prev, name) { Money.format(it) },
+            insights = if (period == ReportPeriod.MONTH) {
+                Insights.forMonth(month, today, cur, prev, name) { Money.format(it) }
+            } else {
+                Insights.forPeriod(cur, prev, range.dayCount, "${period.name.lowercase()}", name) { Money.format(it) }
+            },
             budgets = Budgets.progress(budgets.associate { it.categoryId to it.limitPaise }, byCategory, spent, DatabaseSetup.CATEGORY_ALL_SPENDING),
             recurring = Recurring.detect(billRows) { kindFor(it) }
                 .filter { it.merchantKey !in trackedKeys }
@@ -187,6 +212,7 @@ class AnalyticsRepository @Inject constructor(private val db: SpendWiseDatabase,
 
     companion object {
         const val TREND_MONTHS = 6
+        const val YEAR_TREND_MONTHS = 12
         const val BILL_MONTHS = 13L
         const val MAX_BUDGET_PAISE = 10_000_000_000L // ₹10 crore
     }

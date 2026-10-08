@@ -50,6 +50,7 @@ import com.spendwise.app.ui.glass.liquidGlass
 import com.kyant.shapes.RoundedRectangle
 import com.spendwise.app.ui.theme.Radius
 import com.spendwise.app.ui.theme.SpendWise
+import com.spendwise.app.ui.theme.financialFigures
 import com.spendwise.app.ui.theme.Spacing
 
 /** Grouped container: solid surface with a glass edge (ADR-009), continuous 20dp corners. Never glass-in-glass. */
@@ -72,7 +73,7 @@ fun GroupCard(
 fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
-        style = MaterialTheme.typography.labelMedium,
+        style = MaterialTheme.typography.labelMedium.let { if ('₹' in text) it.financialFigures() else it },
         color = SpendWise.colors.text2,
         modifier = modifier.padding(start = Spacing.screen + Spacing.xxs, end = Spacing.screen, top = Spacing.lg, bottom = Spacing.xs),
     )
@@ -201,8 +202,7 @@ fun <T> SegmentedChoice(
 }
 
 /**
- * Money with ₹ and paise de-emphasised but legible (ADR-009): ₹ at 70% in the amount's colour, ".75" at 70% in text 2.
- * Always uses tabular figures through the money styles.
+ * Money with a slightly de-emphasised but readable ₹ and paise; leave a thin visual gap after the symbol.
  */
 @Composable
 fun MoneyText(
@@ -218,9 +218,11 @@ fun MoneyText(
         val rupeeIndex = formatted.indexOf('₹')
         val dotIndex = formatted.indexOf('.')
         append(formatted.substring(0, rupeeIndex))
-        withStyle(SpanStyle(fontSize = 0.7.em)) { append('₹') }
+        withStyle(SpanStyle(fontSize = 1.em)) { append('₹') }
         val wholeEnd = if (dotIndex >= 0) dotIndex else formatted.length
-        append(formatted.substring(rupeeIndex + 1, wholeEnd))
+        val amountStart = if (formatted.getOrNull(rupeeIndex + 1) == '\u2009') rupeeIndex + 2 else rupeeIndex + 1
+        if (amountStart == rupeeIndex + 1) append('\u2009')
+        append(formatted.substring(amountStart, wholeEnd))
         if (dotIndex >= 0) {
             withStyle(SpanStyle(fontSize = 0.7.em, color = secondary)) { append(formatted.substring(dotIndex)) }
         }

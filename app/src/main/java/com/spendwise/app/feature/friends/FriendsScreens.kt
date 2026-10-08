@@ -63,6 +63,7 @@ import com.spendwise.app.ui.components.TextInput
 import com.spendwise.app.ui.components.TxnText
 import com.spendwise.app.ui.components.parseSignedRupees
 import com.spendwise.app.ui.theme.SpendWise
+import com.spendwise.app.ui.theme.financialFigures
 import com.spendwise.app.ui.theme.Spacing
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -213,7 +214,7 @@ fun FriendDetailScreen(
                         } else {
                             Text("Owes you", style = MaterialTheme.typography.labelMedium, color = colors.text2)
                             perAccount.forEach { (account, paise) ->
-                                Text("${Money.format(paise)} · from $account", style = MaterialTheme.typography.titleMedium, color = colors.text1)
+                                Text("${Money.format(paise)} · from $account", style = MaterialTheme.typography.titleMedium.financialFigures(), color = colors.text1)
                             }
                         }
                     }
@@ -380,7 +381,7 @@ fun BillSharesSection(
 private fun SharePanel(defaultPaise: Long, maxPaise: Long, friends: List<FriendEntity>, onCancel: () -> Unit, onSave: (String, Long) -> Unit) {
     val colors = SpendWise.colors
     var name by remember { mutableStateOf(friends.firstOrNull()?.name.orEmpty()) }
-    var amount by remember { mutableStateOf(Money.format(defaultPaise.coerceAtMost(maxPaise), Money.SignStyle.None).removePrefix("₹")) }
+    var amount by remember { mutableStateOf(Money.format(defaultPaise.coerceAtMost(maxPaise), Money.SignStyle.None).removePrefix("₹").trimStart()) }
     var error by remember { mutableStateOf<String?>(null) }
     Spacer(Modifier.height(Spacing.md))
     GroupCard {

@@ -1,9 +1,8 @@
 package com.spendwise.app.navigation
 
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Home
@@ -19,9 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -50,7 +46,6 @@ import com.spendwise.app.ui.components.GlassTopBar
 import com.spendwise.app.ui.components.LiquidTabBar
 import com.spendwise.app.ui.glass.LocalGlassTopBar
 import com.spendwise.app.ui.glass.GlassScaffold
-import com.spendwise.app.ui.theme.SpendWise
 import kotlinx.serialization.Serializable
 
 /* Routes. Top-level tabs reset the back stack; detail routes push onto it. */
@@ -90,7 +85,6 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
     val top = backStack.lastOrNull()
     val currentTab = backStack.firstOrNull() ?: HomeRoute
     val showBar = top in TopLevelItems.map { it.key }
-    val motion = SpendWise.motion
 
     // A tapped notification: open the transaction (or the review list) on top of Home.
     val link by AppLinks.pending.collectAsStateWithLifecycle()
@@ -111,18 +105,14 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
         reduceTransparency = reduceTransparency,
         overlay = {
             LocalGlassTopBar.current?.let { GlassTopBar(it, Modifier.align(Alignment.TopCenter)) }
-            AnimatedVisibility(
-                visible = showBar,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter),
-            ) {
+            if (showBar) {
                 LiquidTabBar(
                     items = TopLevelItems,
                     selected = currentTab,
                     onSelect = { backStack.switchTab(it) },
                     onPrimaryAction = { backStack.add(AddTransactionRoute()) },
                     primaryActionLabel = "Add expense",
+                    modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
         },
@@ -143,12 +133,10 @@ fun SpendWiseNavHost(appViewModel: AppViewModel = hiltViewModel()) {
                     rememberViewModelStoreNavEntryDecorator(),
                 ),
                 transitionSpec = {
-                    fadeIn(tween(motion.duration(motion.medium), easing = motion.emphasizedDecelerate)) togetherWith
-                        fadeOut(tween(motion.duration(motion.short)))
+                    EnterTransition.None togetherWith ExitTransition.None
                 },
                 popTransitionSpec = {
-                    fadeIn(tween(motion.duration(motion.medium), easing = motion.emphasizedDecelerate)) togetherWith
-                        fadeOut(tween(motion.duration(motion.short)))
+                    EnterTransition.None togetherWith ExitTransition.None
                 },
                 entryProvider = entryProvider {
                     entry<HomeRoute> {

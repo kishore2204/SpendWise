@@ -171,7 +171,7 @@ class AddTransactionViewModel @AssistedInject constructor(
         _form.update {
             it.copy(
                 mode = mode,
-                amount = Money.format(abs(t.amountPaise), Money.SignStyle.None).removePrefix("₹"),
+                amount = Money.format(abs(t.amountPaise), Money.SignStyle.None).removePrefix("₹").trimStart(),
                 accountId = from,
                 toAccountId = to,
                 categoryId = t.categoryId,

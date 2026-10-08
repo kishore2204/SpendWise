@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Autorenew
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.Savings
@@ -31,23 +34,32 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.Zoom
@@ -58,6 +70,8 @@ import com.patrykandpatrick.vico.compose.cartesian.axis.HorizontalAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.VerticalAxis
 import com.patrykandpatrick.vico.compose.cartesian.data.CartesianChartModel
 import com.patrykandpatrick.vico.compose.cartesian.data.ColumnCartesianLayerModel
+import com.spendwise.app.domain.analytics.ReportDateRange
+import com.spendwise.app.domain.analytics.ReportPeriod
 import com.patrykandpatrick.vico.compose.cartesian.layer.ColumnCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberColumnCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
@@ -76,6 +90,7 @@ import com.spendwise.app.data.db.entity.AccountEntity
 import com.spendwise.app.data.db.entity.Cadence
 import com.spendwise.app.data.db.entity.CategoryKind
 import com.spendwise.app.domain.LedgerResult
+import com.spendwise.app.feature.accounts.AccountVisuals
 import com.spendwise.app.domain.analytics.AnalyticsRepository
 import com.spendwise.app.domain.analytics.BudgetProgress
 import com.spendwise.app.domain.analytics.BudgetState
@@ -85,12 +100,15 @@ import com.spendwise.app.ui.components.CategoryIcons
 import com.spendwise.app.ui.components.Chip
 import com.spendwise.app.ui.components.ChipRow
 import com.spendwise.app.ui.components.EmptyState
+import com.spendwise.app.ui.components.AccountContextPill
 import com.spendwise.app.ui.components.GroupCard
 import com.spendwise.app.ui.components.LargeTitleScreen
 import com.spendwise.app.ui.components.ListRow
 import com.spendwise.app.ui.components.MoneyInput
 import com.spendwise.app.ui.components.MoneyText
 import com.spendwise.app.ui.components.SectionLabel
+import com.spendwise.app.ui.components.LiquidPeriodPickerOverlay
+import com.spendwise.app.ui.components.LiquidPeriodPickerTrigger
 import com.spendwise.app.ui.components.parseSignedRupees
 import com.spendwise.app.ui.glass.GlassKind
 import com.spendwise.app.ui.glass.liquidGlass
@@ -103,6 +121,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -113,6 +132,25 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
+data class InsightsUiState(
+    val initialized: Boolean = false,
+    val accounts: List<AccountEntity> = emptyList(),
+    val selectedAccountId: Long? = null,
+    val period: ReportPeriod = ReportPeriod.MONTH,
+    val offset: Int = 0,
+    val range: ReportDateRange,
+    val report: MonthAnalytics? = null,
+    val loading: Boolean = true,
+)
+
+private data class InsightsRequest(
+    val accounts: List<AccountEntity>,
+    val selectedAccountId: Long?,
+    val today: LocalDate,
+    val period: ReportPeriod,
+    val offset: Int,
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class InsightsViewModel @Inject constructor(
@@ -121,31 +159,71 @@ class InsightsViewModel @Inject constructor(
     private val analytics: AnalyticsRepository,
     private val clock: Clock,
 ) : ViewModel() {
-    val thisMonth: YearMonth = YearMonth.from(IndiaTime.localDate(clock.now()))
-    private val _month = MutableStateFlow(thisMonth)
-    val month: StateFlow<YearMonth> = _month
-
-    val accounts: StateFlow<List<AccountEntity>> = accounts.observeAccountsWithBalances().map { l -> l.map { it.account } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val _today = MutableStateFlow(ReportPeriod.today(clock.now()))
+    private val _period = MutableStateFlow(ReportPeriod.MONTH)
+    private val _offset = MutableStateFlow(0)
+    val period: StateFlow<ReportPeriod> = _period
+    val offset: StateFlow<Int> = _offset
     val selectedId: StateFlow<Long?> = selected.selectedAccountId.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /** ONE account's month; re-subscribes per (account, month) so a switch can never show the previous account's data. */
-    val data: StateFlow<MonthAnalytics?> = combine(selected.selectedAccountId, _month) { id, m -> id to m }
-        .flatMapLatest { (id, m) -> if (id == null) flowOf(null) else analytics.observe(id, m) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    /**
+     * The controls and report are published as one keyed state. The first emission for a new key is Loading,
+     * so an initial empty-account state or a previous report can never flash before the current Room result.
+     */
+    val uiState: StateFlow<InsightsUiState> = combine(
+        accounts.observeAccountsWithBalances().map { rows -> rows.map { it.account } },
+        selected.selectedAccountId,
+        _today,
+        _period,
+        _offset,
+    ) { accountRows, selectedAccountId, today, selectedPeriod, selectedOffset ->
+        InsightsRequest(accountRows, selectedAccountId, today, selectedPeriod, selectedOffset)
+    }.flatMapLatest { request ->
+        val range = request.period.range(request.today, request.offset)
+        val base = InsightsUiState(
+            initialized = true,
+            accounts = request.accounts,
+            selectedAccountId = request.selectedAccountId,
+            period = request.period,
+            offset = request.offset,
+            range = range,
+            loading = true,
+        )
+        when {
+            request.accounts.isEmpty() -> flowOf(base.copy(loading = false))
+            request.selectedAccountId == null || request.accounts.none { it.id == request.selectedAccountId } -> flowOf(base)
+            else -> kotlinx.coroutines.flow.flow {
+                emit(base)
+                analytics.observeRange(request.selectedAccountId, range, request.period).collect { report ->
+                    val matches = report.accountId == request.selectedAccountId &&
+                        report.rangeStart == range.start && report.rangeEnd == range.endInclusive &&
+                        report.period == request.period
+                    emit(if (matches) base.copy(report = report, loading = false) else base)
+                }
+            }
+        }
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        InsightsUiState(range = ReportPeriod.MONTH.range(_today.value)),
+    )
 
     /** (accountId, text): shown only while that account is on screen. */
     val message = MutableStateFlow<Pair<Long, String>?>(null)
 
     fun select(accountId: Long) = viewModelScope.launch { message.value = null; selected.select(accountId) }
-    fun previousMonth() { message.value = null; _month.value = _month.value.minusMonths(1) }
-    fun nextMonth() { if (_month.value < thisMonth) { message.value = null; _month.value = _month.value.plusMonths(1) } }
+    fun selectPeriod(value: ReportPeriod) { message.value = null; _period.value = value; _offset.value = 0 }
+    fun previousPeriod() { message.value = null; _offset.value -= 1 }
+    fun nextPeriod() { if (_offset.value < 0) { message.value = null; _offset.value += 1 } }
+    fun refreshToday() { _today.value = ReportPeriod.today(clock.now()) }
 
     /**
      * Writes use the account and month the user was LOOKING at (passed from the drawn data), and are refused if the
      * selection changed in between — never "whatever is loaded at tap time" (rule #1).
      */
-    private fun stillShowing(accountId: Long) = selectedId.value == accountId && data.value?.accountId == accountId
+    private fun stillShowing(accountId: Long): Boolean = uiState.value.let { state ->
+        !state.loading && state.selectedAccountId == accountId && state.report?.accountId == accountId
+    }
 
     fun setBudget(accountId: Long, month: YearMonth, categoryId: Long, paise: Long) = viewModelScope.launch {
         if (!stillShowing(accountId)) return@launch
@@ -165,27 +243,38 @@ class InsightsViewModel @Inject constructor(
     fun today(): LocalDate = IndiaTime.localDate(clock.now())
 }
 
-private val MONTH: DateTimeFormatter = DateTimeFormatter.ofPattern("MMMM yyyy")
 private val SHORT_MONTH: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM")
+private val MONTH: DateTimeFormatter = DateTimeFormatter.ofPattern("MMMM yyyy")
 
 @Composable
 fun InsightsScreen(viewModel: InsightsViewModel = hiltViewModel()) {
-    val data by viewModel.data.collectAsStateWithLifecycle()
-    val accounts by viewModel.accounts.collectAsStateWithLifecycle()
-    val selectedId by viewModel.selectedId.collectAsStateWithLifecycle()
-    val month by viewModel.month.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val accounts = state.accounts
+    val selectedId = state.selectedAccountId
+    val period = state.period
+    val offset = state.offset
+    val range = state.range
+    val data = state.report
     val message by viewModel.message.collectAsStateWithLifecycle()
     val colors = SpendWise.colors
     val account = accounts.firstOrNull { it.id == selectedId }
+    var periodPickerOpen by rememberSaveable { mutableStateOf(false) }
+    var periodPickerAnchor by remember { mutableStateOf<Rect?>(null) }
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshToday()
+        onPauseOrDispose { }
+    }
 
-    LargeTitleScreen(title = "Insights", eyebrow = account?.let { "${it.nickname} ••${it.last4}".trimEnd(' ', '•') }) {
-        if (accounts.isEmpty()) {
+    Box(Modifier.fillMaxSize()) {
+    LargeTitleScreen(title = "Insights", titleBottomSpacing = Spacing.xs) {
+        if (!state.initialized) {
+            item(key = "loading-account-context") { InsightsContextPlaceholder() }
+        } else if (accounts.isEmpty()) {
             item(key = "empty") {
                 EmptyState(icon = Icons.Rounded.Insights, title = "Nothing to analyse yet", body = "Insights appear once an account has transactions — always for one account at a time.")
             }
             return@LargeTitleScreen
-        }
-        if (accounts.size > 1) {
+        } else if (accounts.size > 1) {
             item(key = "accounts") {
                 val dupes = accounts.groupBy { it.nickname }.filter { it.value.size > 1 }.keys
                 ChipRow(
@@ -196,11 +285,36 @@ fun InsightsScreen(viewModel: InsightsViewModel = hiltViewModel()) {
                 )
                 Spacer(Modifier.height(Spacing.sm))
             }
+        } else {
+            account?.let { current ->
+                item(key = "account-context") {
+                    AccountContextPill(AccountVisuals.short(current))
+                }
+            }
         }
-        item(key = "month") { MonthBar(month, canGoNext = month < viewModel.thisMonth, onPrev = viewModel::previousMonth, onNext = viewModel::nextMonth) }
-        val a = data ?: return@LargeTitleScreen
+        item(key = "period-picker") {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.screen),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Period", style = MaterialTheme.typography.labelMedium, color = colors.text2, modifier = Modifier.weight(1f))
+                PeriodPicker(
+                    selected = period,
+                    expanded = periodPickerOpen,
+                    onToggle = { periodPickerOpen = !periodPickerOpen },
+                    onAnchorChanged = { periodPickerAnchor = it },
+                )
+            }
+        }
+        item(key = "period-range") {
+            MonthBar(period.label(range), canGoNext = offset < 0, onPrev = viewModel::previousPeriod, onNext = viewModel::nextPeriod)
+        }
         // Never draw one account's numbers under another account's name (ADR-003 stamp).
-        if (a.accountId != selectedId || a.month != month) return@LargeTitleScreen
+        val a = data
+        if (!state.initialized || state.loading || a == null || a.accountId != selectedId || a.rangeStart != range.start || a.rangeEnd != range.endInclusive || a.period != period) {
+            item(key = "report-pending") { InsightsReportPlaceholder() }
+            return@LargeTitleScreen
+        }
 
         item(key = "summary") { SummaryCard(a) }
 
@@ -222,21 +336,25 @@ fun InsightsScreen(viewModel: InsightsViewModel = hiltViewModel()) {
         }
 
         if (a.spentPaise > 0) {
-            item(key = "daily-label") { SectionLabel("Day by day") }
+            item(key = "daily-label") { SectionLabel(if (period == ReportPeriod.YEAR) "Month by month" else "Day by day") }
             item(key = "daily") {
                 ChartCard {
                     ColumnChart(
-                        series = listOf(a.daily.map { it.coerceAtLeast(0) / 100 }),
+                        series = listOf(if (period == ReportPeriod.YEAR) a.trend.map { it.second.coerceAtLeast(0) / 100 } else a.daily.map { it.coerceAtLeast(0) / 100 }),
                         colors = listOf(colors.expense),
-                        xLabel = { x -> (x + 1).toString() }, // day of month
-                        labelEvery = 5,
+                        xLabel = { x ->
+                            if (period == ReportPeriod.YEAR) a.trend.getOrNull(x)?.first?.format(SHORT_MONTH).orEmpty()
+                            else if (period == ReportPeriod.DAY) range.start.format(DateTimeFormatter.ofPattern("d MMM"))
+                            else range.start.plusDays(x.toLong()).let { if (period == ReportPeriod.WEEK) it.dayOfWeek.name.take(3).lowercase().replaceFirstChar(Char::uppercase) else it.dayOfMonth.toString() }
+                        },
+                        labelEvery = when (period) { ReportPeriod.DAY, ReportPeriod.WEEK -> 1; ReportPeriod.MONTH -> 5; ReportPeriod.YEAR -> 1 },
                     )
-                    Text("Spending per day in ${month.format(SHORT_MONTH)}, in ₹", style = MaterialTheme.typography.labelSmall, color = colors.text2)
+                    Text(if (period == ReportPeriod.YEAR) "Spending per month in ₹" else "Spending per day, in ₹", style = MaterialTheme.typography.labelSmall, color = colors.text2)
                 }
             }
         }
 
-        if (a.trend.any { it.second != 0L || it.third != 0L }) {
+        if (period == ReportPeriod.MONTH && a.trend.any { it.second != 0L || it.third != 0L }) {
             item(key = "trend-label") { SectionLabel("Last 6 months") }
             item(key = "trend") {
                 ChartCard {
@@ -270,10 +388,12 @@ fun InsightsScreen(viewModel: InsightsViewModel = hiltViewModel()) {
             }
         }
 
-        item(key = "budgets-label") { SectionLabel("Budgets · ${account?.nickname ?: ""}") }
-        item(key = "budgets") {
-            // Form state belongs to this account and month — a switch starts fresh (rule #1).
-            key(a.accountId, a.month) { BudgetsCard(a, onSet = { cat, paise -> viewModel.setBudget(a.accountId, a.month, cat, paise) }) }
+        if (period == ReportPeriod.MONTH) {
+            item(key = "budgets-label") { SectionLabel("Budgets · ${account?.nickname ?: ""}") }
+            item(key = "budgets") {
+                // Form state belongs to this account and month — a switch starts fresh (rule #1).
+                key(a.accountId, a.month) { BudgetsCard(a, onSet = { cat, paise -> viewModel.setBudget(a.accountId, a.month, cat, paise) }) }
+            }
         }
 
         if (a.tracked.isNotEmpty() || a.recurring.isNotEmpty()) {
@@ -287,18 +407,69 @@ fun InsightsScreen(viewModel: InsightsViewModel = hiltViewModel()) {
         message?.takeIf { it.first == a.accountId }?.let { (_, m) -> item(key = "msg") { Text(m, color = colors.danger, modifier = Modifier.padding(Spacing.screen)) } }
         item(key = "end") { Spacer(Modifier.height(Spacing.xl)) }
     }
+        LiquidPeriodPickerOverlay(
+            expanded = periodPickerOpen,
+            selected = period,
+            anchorInWindow = periodPickerAnchor,
+            onDismiss = { periodPickerOpen = false },
+            onSelect = viewModel::selectPeriod,
+            shortLabels = true,
+        )
+    }
+}
+
+/** Keeps the report header in place while Room supplies the account context. */
+@Composable
+private fun InsightsContextPlaceholder() {
+    val colors = SpendWise.colors
+    Box(Modifier.fillMaxWidth().padding(horizontal = Spacing.screen, vertical = Spacing.xxs)) {
+        Box(Modifier.width(132.dp).height(34.dp).clip(CircleShape).background(colors.surface2))
+    }
 }
 
 @Composable
-private fun MonthBar(month: YearMonth, canGoNext: Boolean, onPrev: () -> Unit, onNext: () -> Unit) {
+private fun InsightsReportPlaceholder() {
+    val colors = SpendWise.colors
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.screen).height(56.dp)
+            .liquidGlass(RoundedCornerShape(Radius.card), GlassKind.Card)
+            .padding(horizontal = Spacing.md)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        Icon(Icons.Rounded.Insights, contentDescription = null, tint = colors.text2, modifier = Modifier.size(20.dp))
+        Text("Preparing this account’s insights", style = MaterialTheme.typography.bodySmall, color = colors.text2)
+    }
+}
+
+@Composable
+private fun MonthBar(label: String, canGoNext: Boolean, onPrev: () -> Unit, onNext: () -> Unit) {
     val colors = SpendWise.colors
     Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.screen), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onPrev) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Previous month", tint = colors.text1) }
-        Text(month.format(MONTH), style = MaterialTheme.typography.titleMedium, color = colors.text1, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text(label, style = MaterialTheme.typography.titleMedium, color = colors.text1, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         IconButton(onClick = onNext, enabled = canGoNext) {
             Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Next month", tint = if (canGoNext) colors.text1 else colors.text3)
         }
     }
+}
+
+@Composable
+private fun PeriodPicker(
+    selected: ReportPeriod,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onAnchorChanged: (Rect) -> Unit,
+) {
+    LiquidPeriodPickerTrigger(
+        selected = selected,
+        expanded = expanded,
+        onToggle = onToggle,
+        onAnchorChanged = onAnchorChanged,
+        shortLabel = true,
+        modifier = Modifier.width(112.dp * LocalDensity.current.fontScale.coerceAtMost(1.9f)),
+    )
 }
 
 @Composable
@@ -331,7 +502,7 @@ private fun SummaryCard(a: MonthAnalytics) {
                 if (a.previousSpentPaise > 0) {
                     val diff = a.spentPaise - a.previousSpentPaise
                     append(" · ")
-                    append(if (diff >= 0) "${Money.format(diff)} more than last month" else "${Money.format(-diff)} less than last month")
+                    append(if (diff >= 0) "${Money.format(diff)} more than ${a.previousLabel}" else "${Money.format(-diff)} less than ${a.previousLabel}")
                 }
             },
             style = MaterialTheme.typography.bodySmall,

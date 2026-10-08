@@ -111,6 +111,20 @@ interface LedgerDao {
     )
     fun observeDisplayedBalance(accountId: Long): Flow<Long>
 
+    /** Current displayed balance for one account, read inside ledger write transactions as well as by Flow. */
+    @Query(
+        """
+        SELECT COALESCE(a.balancePaise, 0)
+             + COALESCE((SELECT SUM(t.amountPaise) FROM v_confirmed_txn t
+                         WHERE t.accountId = :accountId
+                           AND t.occurredAt > COALESCE(a.effectiveAt, -9223372036854775807)), 0)
+        FROM (SELECT 1) AS one
+        LEFT JOIN (SELECT balancePaise, effectiveAt FROM balance_anchor WHERE accountId = :accountId
+                   ORDER BY effectiveAt DESC, id DESC LIMIT 1) AS a ON 1 = 1
+        """,
+    )
+    suspend fun displayedBalance(accountId: Long): Long
+
     @Query("SELECT COALESCE(SUM(amountPaise), 0) FROM v_confirmed_txn WHERE accountId = :accountId")
     fun observeConfirmedTotal(accountId: Long): Flow<Long>
 
@@ -145,6 +159,9 @@ interface LedgerDao {
         """,
     )
     suspend fun confirmedBetween(accountId: Long, fromExclusive: Long, toInclusive: Long): Long
+
+    @Query("SELECT EXISTS(SELECT 1 FROM v_confirmed_txn WHERE accountId = :accountId AND occurredAt > :after)")
+    suspend fun hasConfirmedAfter(accountId: Long, after: Long): Boolean
 
     /**
      * Month summary for ONE account (net effect).
@@ -254,6 +271,9 @@ interface TxnDao {
 
     @Query("SELECT * FROM txn WHERE id = :id")
     suspend fun getById(id: Long): TxnEntity?
+
+    @Query("SELECT COUNT(*) FROM txn_source WHERE txnId = :txnId")
+    suspend fun sourceCount(txnId: Long): Int
 
     /** Σ of confirmed legs for one account — reads the view, never `txn`. */
     @Query("SELECT COALESCE(SUM(amountPaise), 0) FROM v_confirmed_txn WHERE accountId = :accountId")

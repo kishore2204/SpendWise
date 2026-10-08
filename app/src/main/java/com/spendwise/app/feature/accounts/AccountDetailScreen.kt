@@ -228,11 +228,7 @@ fun AccountDetailScreen(
                             Column(horizontalAlignment = Alignment.End) {
                                 MoneyText(adj.balancePaise, style = SpendWise.money.row)
                                 adj.deltaPaise?.let { d ->
-                                    Text(
-                                        Money.format(d, Money.SignStyle.Always),
-                                        style = SpendWise.money.small,
-                                        color = colors.text2,
-                                    )
+                                    MoneyText(d, style = SpendWise.money.small, color = colors.text2, sign = Money.SignStyle.Always)
                                 }
                             }
                         }
@@ -292,10 +288,11 @@ private val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")
 private fun BreakdownLine(label: String, paise: Long, signed: Boolean = false) {
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = SpendWise.colors.text2)
-        Text(
-            Money.format(paise, if (signed) Money.SignStyle.Always else Money.SignStyle.NegativeOnly),
+        MoneyText(
+            paise,
             style = SpendWise.money.small,
             color = SpendWise.colors.text2,
+            sign = if (signed) Money.SignStyle.Always else Money.SignStyle.NegativeOnly,
         )
     }
 }

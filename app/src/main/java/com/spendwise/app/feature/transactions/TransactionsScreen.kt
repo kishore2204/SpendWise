@@ -39,6 +39,7 @@ import com.spendwise.app.data.db.dao.TxnDao
 import com.spendwise.app.data.db.dao.TxnRow
 import com.spendwise.app.feature.accounts.AccountVisuals
 import com.spendwise.app.ui.components.EmptyState
+import com.spendwise.app.ui.components.AccountContextPill
 import com.spendwise.app.ui.components.LargeTitleScreen
 import com.spendwise.app.ui.components.SectionLabel
 import com.spendwise.app.ui.components.TransactionRowView
@@ -91,7 +92,10 @@ fun TransactionsScreen(
     BackHandler(onBack = onClose)
 
     Box(Modifier.fillMaxSize()) {
-        LargeTitleScreen(title = "Transactions", eyebrow = account?.let(AccountVisuals::short), reserveBottomBar = false) {
+        LargeTitleScreen(title = "Transactions", titleBottomSpacing = Spacing.xs, reserveBottomBar = false) {
+            account?.let { current ->
+                item(key = "account-context") { AccountContextPill(AccountVisuals.short(current)) }
+            }
             if (items.itemCount == 0) {
                 item(key = "empty") {
                     EmptyState(

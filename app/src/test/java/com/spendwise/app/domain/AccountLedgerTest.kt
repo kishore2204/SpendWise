@@ -12,9 +12,13 @@ import com.spendwise.app.data.db.SpendWiseDatabase
 import com.spendwise.app.data.db.entity.AccountType
 import com.spendwise.app.data.db.entity.AnchorSource
 import com.spendwise.app.data.db.entity.Confidence
+import com.spendwise.app.data.db.entity.MessageSource
+import com.spendwise.app.data.db.entity.ParseStatus
+import com.spendwise.app.data.db.entity.RawMessageEntity
 import com.spendwise.app.data.db.entity.TimeSource
 import com.spendwise.app.data.db.entity.TxnEntity
 import com.spendwise.app.data.db.entity.TxnKind
+import com.spendwise.app.data.db.entity.TxnSourceEntity
 import com.spendwise.app.data.db.entity.TxnStatus
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -50,15 +54,22 @@ class AccountLedgerTest {
         return (r as CreateAccountResult.Created).accountId
     }
 
-    private suspend fun txn(accountId: Long, amount: Long, kind: TxnKind, at: Long, status: TxnStatus = TxnStatus.CONFIRMED) {
-        db.txnDao().insert(
+    private suspend fun txn(
+        accountId: Long,
+        amount: Long,
+        kind: TxnKind,
+        at: Long,
+        status: TxnStatus = TxnStatus.CONFIRMED,
+        reportedBalance: Long? = null,
+        reportedAt: Long? = null,
+    ): Long = db.txnDao().insert(
             TxnEntity(
                 accountId = accountId, amountPaise = amount, isCredit = amount > 0, kind = kind, status = status,
                 confidence = Confidence.HIGH, occurredAt = at, localEpochDay = IndiaTime.localEpochDay(at),
-                timeSource = TimeSource.MANUAL, createdAt = at, updatedAt = at,
+                timeSource = TimeSource.MANUAL, reportedBalancePaise = reportedBalance, reportedBalanceAt = reportedAt,
+                createdAt = at, updatedAt = at,
             ),
         )
-    }
 
     @Test fun `new account shows its opening balance as an adjustment over zero transactions`() = runTest {
         val id = create("INDBNK", "8625", 284444)
@@ -111,6 +122,110 @@ class AccountLedgerTest {
         now += 1_000; ledger.setBalance(id, 256_844, AnchorSource.RECONCILE)
         assertThat(ledger.adjustmentHistory(id).last().source).isEqualTo(AnchorSource.RECONCILE)
         assertThat(repo.observeBalance(id).first().displayedPaise).isEqualTo(256_844)
+    }
+
+    @Test fun `SMS balance reconciliation preserves confirmed transactions after the message`() = runTest {
+        val id = create("INDBNK", "8625", 100_000)
+        val other = create("HDFCBK", "1111", 300_000)
+        now += 1_000
+        val txnId = txn(id, -20_000, TxnKind.EXPENSE, now, reportedBalance = 75_000, reportedAt = now + 1_000)
+        val smsAt = now + 1_000
+        val rawId = db.rawMessageDao().insertOrIgnore(
+            RawMessageEntity(
+                source = MessageSource.SMS_LIVE, sender = "VM-INDBNK-S", body = "anonymized bank message",
+                sentAt = smsAt, receivedAt = smsAt, fingerprint = "balance-test-$txnId",
+                parseStatus = ParseStatus.PARSED, parserVersion = 1, bankHint = "INDBNK",
+            ),
+        )
+        db.reviewDao().insertSource(TxnSourceEntity(txnId, rawId))
+        txn(id, -2_000, TxnKind.EXPENSE, smsAt + 1_000)
+        now = smsAt + 2_000
+
+        val comparison = ledger.compareSmsBalance(id, 75_000, smsAt)!!
+        assertThat(comparison.displayedNowPaise).isEqualTo(78_000)
+        assertThat(comparison.estimatedAtSmsPaise).isEqualTo(80_000)
+        assertThat(comparison.adjustmentPaise).isEqualTo(-5_000)
+        assertThat(ledger.reconcileSmsBalance(txnId, id, 75_000, smsAt)).isInstanceOf(LedgerResult.Ok::class.java)
+        assertThat(repo.observeBalance(id).first().displayedPaise).isEqualTo(73_000)
+        assertThat(repo.observeBalance(other).first().displayedPaise).isEqualTo(300_000)
+        assertThat(ledger.adjustmentHistory(other).map { it.source }).containsExactly(AnchorSource.OPENING)
+        assertThat(ledger.adjustmentHistory(id).last().source).isEqualTo(AnchorSource.RECONCILE)
+        assertThat(db.txnDao().confirmedSum(id)).isEqualTo(-22_000)
+    }
+
+    @Test fun `SMS balance comparison refuses stale anchors, old messages and credit cards`() = runTest {
+        val savings = create("INDBNK", "8625", 100_000)
+        val card = create("HDFCBK", "1111", 50_000, AccountType.CREDIT_CARD)
+        val smsAt = now
+        now += 1_000
+        ledger.setBalance(savings, 90_000, AnchorSource.MANUAL)
+        assertThat(ledger.compareSmsBalance(savings, 80_000, smsAt)).isNull()
+        assertThat(ledger.compareSmsBalance(card, 40_000, now)).isNull()
+        assertThat(ledger.compareSmsBalance(savings, 80_000, now - AccountLedger.SMS_BALANCE_MAX_AGE_MS - 1)).isNull()
+
+        val another = create("AXIS", "2222", 20_000)
+        txn(another, -1_000, TxnKind.EXPENSE, now + 1)
+        assertThat(ledger.compareSmsBalance(another, 10_000, now)).isNull() // future-dated activity cannot be safely rebased
+    }
+
+    @Test fun `SMS reconciliation command rejects a still-pending transaction`() = runTest {
+        val account = create("INDBNK", "8625", 100_000)
+        val pendingAt = now + 1_000
+        val txnId = txn(account, -1_000, TxnKind.EXPENSE, pendingAt, TxnStatus.PENDING, reportedBalance = 90_000, reportedAt = pendingAt)
+        val rawId = db.rawMessageDao().insertOrIgnore(
+            RawMessageEntity(
+                source = MessageSource.SMS_LIVE, sender = "VM-INDBNK-S", body = "anonymized bank message",
+                sentAt = pendingAt, receivedAt = pendingAt, fingerprint = "pending-balance-$txnId",
+                parseStatus = ParseStatus.PARSED, parserVersion = 1, bankHint = "INDBNK",
+            ),
+        )
+        db.reviewDao().insertSource(TxnSourceEntity(txnId, rawId))
+        assertThat(ledger.reconcileSmsBalance(txnId, account, 90_000, pendingAt)).isInstanceOf(LedgerResult.Rejected::class.java)
+        assertThat(repo.observeBalance(account).first().displayedPaise).isEqualTo(100_000)
+    }
+
+    @Test fun `SMS reconciliation rejects mismatched account balance and timestamp`() = runTest {
+        val account = create("INDBNK", "8625", 100_000)
+        val other = create("HDFCBK", "1111", 200_000)
+        val smsAt = now + 1_000
+        val txnId = txn(account, -1_000, TxnKind.EXPENSE, smsAt, reportedBalance = 90_000, reportedAt = smsAt)
+        val rawId = db.rawMessageDao().insertOrIgnore(
+            RawMessageEntity(
+                source = MessageSource.SMS_LIVE, sender = "VM-INDBNK-S", body = "anonymized bank message",
+                sentAt = smsAt, receivedAt = smsAt, fingerprint = "mismatch-balance-$txnId",
+                parseStatus = ParseStatus.PARSED, parserVersion = 1, bankHint = "INDBNK",
+            ),
+        )
+        db.reviewDao().insertSource(TxnSourceEntity(txnId, rawId))
+        now = smsAt + 1_000
+
+        assertThat(ledger.reconcileSmsBalance(txnId, other, 90_000, smsAt)).isInstanceOf(LedgerResult.Rejected::class.java)
+        assertThat(ledger.reconcileSmsBalance(txnId, account, 89_999, smsAt)).isInstanceOf(LedgerResult.Rejected::class.java)
+        assertThat(ledger.reconcileSmsBalance(txnId, account, 90_000, smsAt + 1)).isInstanceOf(LedgerResult.Rejected::class.java)
+        assertThat(repo.observeBalance(account).first().displayedPaise).isEqualTo(99_000)
+        assertThat(repo.observeBalance(other).first().displayedPaise).isEqualTo(200_000)
+    }
+
+    @Test fun `SMS reconciliation rejects a dialog made stale by a later balance anchor`() = runTest {
+        val account = create("INDBNK", "8625", 100_000)
+        val smsAt = now + 1_000
+        val txnId = txn(account, -1_000, TxnKind.EXPENSE, smsAt, reportedBalance = 90_000, reportedAt = smsAt)
+        val rawId = db.rawMessageDao().insertOrIgnore(
+            RawMessageEntity(
+                source = MessageSource.SMS_LIVE, sender = "VM-INDBNK-S", body = "anonymized bank message",
+                sentAt = smsAt, receivedAt = smsAt, fingerprint = "stale-dialog-$txnId",
+                parseStatus = ParseStatus.PARSED, parserVersion = 1, bankHint = "INDBNK",
+            ),
+        )
+        db.reviewDao().insertSource(TxnSourceEntity(txnId, rawId))
+        now = smsAt + 1_000
+        assertThat(ledger.compareSmsBalance(account, 90_000, smsAt)).isNotNull()
+
+        now += 2_000
+        ledger.setBalance(account, 120_000, AnchorSource.MANUAL)
+        assertThat(ledger.reconcileSmsBalance(txnId, account, 90_000, smsAt)).isInstanceOf(LedgerResult.Rejected::class.java)
+        assertThat(repo.observeBalance(account).first().displayedPaise).isEqualTo(120_000)
+        assertThat(ledger.adjustmentHistory(account).map { it.source }).containsExactly(AnchorSource.OPENING, AnchorSource.MANUAL).inOrder()
     }
 
     @Test fun `balances and month summaries never mix accounts`() = runTest {
@@ -207,7 +322,7 @@ class AccountLedgerTest {
         now += 1_000
         txn(id, 50_000, TxnKind.REFUND, now)
         assertThat(repo.observeThisMonth(id, now).first().spentPaise).isEqualTo(-50_000)
-        assertThat(com.spendwise.app.core.money.Money.format(50_000, com.spendwise.app.core.money.Money.SignStyle.Always)).isEqualTo("+₹500")
+        assertThat(com.spendwise.app.core.money.Money.format(50_000, com.spendwise.app.core.money.Money.SignStyle.Always)).isEqualTo("+₹\u2009500")
     }
 
     @Test fun `balance history is append-only in the database`() = runTest {
